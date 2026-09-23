@@ -1,0 +1,910 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AccessAI Agent</title>
+  <style>
+    /* ─── Reset & Base ─────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg-from:    #0d0f1a;
+      --bg-to:      #131628;
+      --surface:    rgba(255,255,255,0.045);
+      --border:     rgba(255,255,255,0.08);
+      --text:       #e8eaf0;
+      --muted:      #7b7f9a;
+      --blue:       #4fc3f7;
+      --yellow:     #ffd54f;
+      --green:      #69f0ae;
+      --white:      #ffffff;
+      --mic-idle:   #1e2236;
+      --mic-active: #1a2a4a;
+      --radius:     14px;
+    }
+
+    html, body {
+      height: 100%;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: linear-gradient(135deg, var(--bg-from) 0%, var(--bg-to) 60%, #1a1040 100%);
+      color: var(--text);
+      overflow-x: hidden;
+    }
+
+    /* ─── Layout ─────────────────────────────────────────────── */
+    .app {
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      grid-template-columns: 1fr;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 18px 32px;
+      border-bottom: 1px solid var(--border);
+      backdrop-filter: blur(8px);
+      background: rgba(13,15,26,0.6);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+    }
+    .logo-icon {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, #4fc3f7, #7c4dff);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .logo span.accent { color: var(--blue); }
+
+    .header-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      color: var(--muted);
+    }
+    .dot-live {
+      width: 8px; height: 8px;
+      background: var(--green);
+      border-radius: 50%;
+      animation: breathe 2s ease-in-out infinite;
+    }
+    @keyframes breathe {
+      0%,100% { opacity: 1; transform: scale(1); }
+      50%      { opacity: 0.4; transform: scale(0.7); }
+    }
+
+    /* ─── Main content ─────────────────────────────────────────── */
+    main {
+      display: grid;
+      grid-template-columns: 1fr 340px;
+      gap: 24px;
+      padding: 28px 32px;
+      align-items: start;
+    }
+
+    /* ─── Left column ─────────────────────────────────────────── */
+    .left-col {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 32px;
+    }
+
+    /* Status bar */
+    .status-bar {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .status-chip {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      border: 1px solid transparent;
+      opacity: 0.35;
+      transition: opacity 0.4s, border-color 0.4s, box-shadow 0.4s;
+    }
+    .status-chip .chip-dot {
+      width: 7px; height: 7px;
+      border-radius: 50%;
+    }
+    .status-chip.active { opacity: 1; }
+
+    .chip-listening  { border-color: var(--blue);   color: var(--blue);   background: rgba(79,195,247,0.08); }
+    .chip-listening  .chip-dot { background: var(--blue);   }
+    .chip-listening.active  .chip-dot { animation: pulse-blue   1s ease-in-out infinite; }
+
+    .chip-processing { border-color: var(--yellow);  color: var(--yellow); background: rgba(255,213,79,0.08); }
+    .chip-processing .chip-dot { background: var(--yellow); }
+    .chip-processing.active .chip-dot { animation: pulse-yellow 1s ease-in-out infinite; }
+
+    .chip-executing  { border-color: var(--green);  color: var(--green);  background: rgba(105,240,174,0.08); }
+    .chip-executing  .chip-dot { background: var(--green);  }
+    .chip-executing.active  .chip-dot { animation: pulse-green  1s ease-in-out infinite; }
+
+    .chip-complete   { border-color: var(--white);  color: var(--white);  background: rgba(255,255,255,0.06); }
+    .chip-complete   .chip-dot { background: var(--white);  }
+    .chip-complete.active   .chip-dot { animation: none; }
+
+    @keyframes pulse-blue   { 0%,100%{box-shadow:0 0 0 0 rgba(79,195,247,.7)}  50%{box-shadow:0 0 0 5px rgba(79,195,247,0)} }
+    @keyframes pulse-yellow { 0%,100%{box-shadow:0 0 0 0 rgba(255,213,79,.7)}  50%{box-shadow:0 0 0 5px rgba(255,213,79,0)} }
+    @keyframes pulse-green  { 0%,100%{box-shadow:0 0 0 0 rgba(105,240,174,.7)} 50%{box-shadow:0 0 0 5px rgba(105,240,174,0)} }
+
+    /* ─── Mic section ─────────────────────────────────────────── */
+    .mic-section {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .mic-ring {
+      position: relative;
+      width: 200px; height: 200px;
+      display: flex; align-items: center; justify-content: center;
+    }
+
+    /* Outer glow rings */
+    .ring-outer, .ring-mid {
+      position: absolute;
+      border-radius: 50%;
+      border: 2px solid;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.4s;
+    }
+    .ring-outer { width: 200px; height: 200px; border-color: rgba(79,195,247,0.25); }
+    .ring-mid   { width: 160px; height: 160px; border-color: rgba(79,195,247,0.4); }
+
+    .mic-ring.active .ring-outer { opacity: 1; animation: ripple 2s ease-out infinite; }
+    .mic-ring.active .ring-mid   { opacity: 1; animation: ripple 2s ease-out infinite 0.4s; }
+    @keyframes ripple {
+      0%   { transform: scale(0.9); opacity: 0.6; }
+      100% { transform: scale(1.2); opacity: 0; }
+    }
+
+    /* Button itself */
+    .mic-btn {
+      position: relative;
+      width: 130px; height: 130px;
+      border-radius: 50%;
+      border: none;
+      cursor: pointer;
+      background: var(--mic-idle);
+      box-shadow: 0 0 0 4px rgba(79,195,247,0.1), 0 8px 32px rgba(0,0,0,0.5);
+      display: flex; align-items: center; justify-content: center;
+      transition: background 0.35s, box-shadow 0.35s, transform 0.15s;
+      outline: none;
+      z-index: 1;
+    }
+    .mic-btn:hover { transform: scale(1.05); }
+    .mic-btn:active { transform: scale(0.97); }
+    .mic-btn.active {
+      background: var(--mic-active);
+      box-shadow: 0 0 0 6px rgba(79,195,247,0.25), 0 0 40px rgba(79,195,247,0.2), 0 8px 32px rgba(0,0,0,0.5);
+    }
+
+    .mic-icon {
+      color: var(--muted);
+      transition: color 0.35s;
+    }
+    .mic-btn.active .mic-icon { color: var(--blue); }
+
+    .mic-label {
+      font-size: 0.8rem;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      transition: color 0.35s;
+    }
+    .mic-ring.active ~ .mic-label { color: var(--blue); }
+
+    /* ─── Waveform ─────────────────────────────────────────────── */
+    .waveform-wrap {
+      width: 100%;
+      max-width: 480px;
+    }
+
+    .waveform-label {
+      font-size: 0.72rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+      text-align: center;
+    }
+
+    .waveform {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      height: 60px;
+    }
+
+    .bar {
+      width: 4px;
+      border-radius: 4px;
+      background: rgba(79,195,247,0.25);
+      height: 6px;
+      transition: background 0.4s;
+    }
+
+    /* When active, bars animate */
+    .waveform.active .bar {
+      background: var(--blue);
+      animation: wave var(--dur, 0.9s) ease-in-out infinite alternate;
+      animation-delay: var(--delay, 0s);
+    }
+    @keyframes wave {
+      from { height: 4px;  opacity: 0.4; }
+      to   { height: var(--max-h, 40px); opacity: 1; }
+    }
+
+    /* ─── Transcript box ──────────────────────────────────────── */
+    .transcript-box {
+      width: 100%;
+      max-width: 480px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      min-height: 72px;
+      font-size: 0.95rem;
+      line-height: 1.6;
+      color: var(--text);
+      position: relative;
+    }
+    .transcript-box .label-sm {
+      font-size: 0.68rem;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      margin-bottom: 6px;
+    }
+    .transcript-text { min-height: 28px; }
+    .cursor {
+      display: inline-block;
+      width: 2px; height: 1em;
+      background: var(--blue);
+      margin-left: 2px;
+      vertical-align: text-bottom;
+      animation: blink 1s step-end infinite;
+    }
+    @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+    /* ─── Right panel – Reasoning ─────────────────────────────── */
+    .right-col {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .panel {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 18px;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.8rem;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .panel-header .panel-badge {
+      background: rgba(79,195,247,0.15);
+      color: var(--blue);
+      padding: 2px 8px;
+      border-radius: 10px;
+      font-size: 0.7rem;
+    }
+
+    /* Reasoning steps */
+    .reasoning-body {
+      padding: 16px 18px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .step {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+      opacity: 0;
+      transform: translateY(6px);
+      transition: opacity 0.5s, transform 0.5s;
+    }
+    .step.visible { opacity: 1; transform: none; }
+
+    .step-num {
+      flex-shrink: 0;
+      width: 22px; height: 22px;
+      border-radius: 50%;
+      background: rgba(79,195,247,0.12);
+      color: var(--blue);
+      font-size: 0.7rem;
+      font-weight: 700;
+      display: flex; align-items: center; justify-content: center;
+      margin-top: 1px;
+    }
+    .step.done .step-num {
+      background: rgba(105,240,174,0.15);
+      color: var(--green);
+    }
+    .step.active .step-num {
+      background: rgba(255,213,79,0.15);
+      color: var(--yellow);
+      animation: spin-soft 1.5s linear infinite;
+    }
+    @keyframes spin-soft { to { transform: rotate(360deg); } }
+
+    .step-body {}
+    .step-title {
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-bottom: 2px;
+    }
+    .step-detail {
+      font-size: 0.75rem;
+      color: var(--muted);
+      line-height: 1.5;
+    }
+    .step.done .step-title  { color: var(--green); }
+    .step.active .step-title { color: var(--yellow); }
+
+    /* Tool tag */
+    .tool-tag {
+      display: inline-block;
+      background: rgba(124,77,255,0.15);
+      color: #b39ddb;
+      border: 1px solid rgba(124,77,255,0.25);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      margin-left: 4px;
+      vertical-align: middle;
+    }
+
+    /* ─── Command History ─────────────────────────────────────── */
+    .history-body {
+      max-height: 280px;
+      overflow-y: auto;
+      padding: 10px 0;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.1) transparent;
+    }
+    .history-body::-webkit-scrollbar { width: 4px; }
+    .history-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 4px; }
+
+    .history-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      padding: 9px 18px;
+      border-bottom: 1px solid var(--border);
+      transition: background 0.2s;
+      cursor: default;
+    }
+    .history-row:last-child { border-bottom: none; }
+    .history-row:hover { background: rgba(255,255,255,0.03); }
+
+    .hist-icon {
+      flex-shrink: 0;
+      width: 28px; height: 28px;
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 13px;
+    }
+
+    .hist-content { flex: 1; min-width: 0; }
+    .hist-cmd {
+      font-size: 0.82rem;
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .hist-meta {
+      font-size: 0.7rem;
+      color: var(--muted);
+      margin-top: 1px;
+    }
+
+    .hist-status {
+      flex-shrink: 0;
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      padding: 2px 7px;
+      border-radius: 8px;
+      margin-top: 3px;
+    }
+    .hist-status.ok  { background: rgba(105,240,174,0.12); color: var(--green); }
+    .hist-status.warn { background: rgba(255,213,79,0.12);  color: var(--yellow); }
+    .hist-status.err { background: rgba(255,82,82,0.12);  color: #ff6b6b; }
+
+    /* ─── Footer ──────────────────────────────────────────────── */
+    footer {
+      padding: 14px 32px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.72rem;
+      color: var(--muted);
+      backdrop-filter: blur(8px);
+      background: rgba(13,15,26,0.5);
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .footer-chips { display: flex; gap: 8px; flex-wrap: wrap; }
+    .f-chip {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.7rem;
+      color: var(--muted);
+    }
+
+    /* ─── Responsive ──────────────────────────────────────────── */
+    @media (max-width: 860px) {
+      main {
+        grid-template-columns: 1fr;
+        padding: 20px 16px;
+      }
+      .right-col { order: -1; }
+      header { padding: 14px 16px; }
+      footer  { padding: 12px 16px; }
+    }
+
+    @media (max-width: 480px) {
+      .mic-btn { width: 110px; height: 110px; }
+      .mic-ring { width: 170px; height: 170px; }
+      .ring-outer { width: 170px; height: 170px; }
+      .ring-mid   { width: 136px; height: 136px; }
+    }
+
+    /* ─── Demo-run animations ────────────────────────────────── */
+    .fade-new {
+      animation: fadeIn 0.4s ease forwards;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(4px); }
+      to   { opacity: 1; transform: none; }
+    }
+  </style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ══ Header ══════════════════════════════════════════════════════ -->
+  <header>
+    <div class="logo">
+      <div class="logo-icon">♿</div>
+      Access<span class="accent">AI</span>&nbsp;Agent
+    </div>
+    <div class="header-status">
+      <div class="dot-live"></div>
+      Agent online · Claude Sonnet&nbsp;4
+    </div>
+  </header>
+
+  <!-- ══ Main ════════════════════════════════════════════════════════ -->
+  <main>
+
+    <!-- ── Left column ─────────────────────────────────────── -->
+    <div class="left-col">
+
+      <!-- Status chips -->
+      <div class="status-bar" id="statusBar">
+        <div class="status-chip chip-listening"  data-state="listening">
+          <span class="chip-dot"></span>Listening
+        </div>
+        <div class="status-chip chip-processing" data-state="processing">
+          <span class="chip-dot"></span>Processing
+        </div>
+        <div class="status-chip chip-executing"  data-state="executing">
+          <span class="chip-dot"></span>Executing
+        </div>
+        <div class="status-chip chip-complete"   data-state="complete">
+          <span class="chip-dot"></span>Complete
+        </div>
+      </div>
+
+      <!-- Mic button -->
+      <div class="mic-section">
+        <div class="mic-ring" id="micRing">
+          <div class="ring-outer"></div>
+          <div class="ring-mid"></div>
+          <button class="mic-btn" id="micBtn" aria-label="Toggle microphone" title="Click to start / stop">
+            <svg class="mic-icon" xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/>
+              <path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 11z"/>
+            </svg>
+          </button>
+        </div>
+        <span class="mic-label" id="micLabel">Click to speak</span>
+      </div>
+
+      <!-- Waveform -->
+      <div class="waveform-wrap">
+        <div class="waveform-label">Audio signal</div>
+        <div class="waveform" id="waveform"></div>
+      </div>
+
+      <!-- Transcript -->
+      <div class="transcript-box">
+        <div class="label-sm">Live transcript</div>
+        <div class="transcript-text" id="transcriptText">
+          <span id="transcriptContent">Tap the mic and speak a command…</span>
+        </div>
+      </div>
+
+    </div><!-- /left-col -->
+
+    <!-- ── Right column ─────────────────────────────────────── -->
+    <div class="right-col">
+
+      <!-- Reasoning panel -->
+      <div class="panel">
+        <div class="panel-header">
+          Agent Reasoning
+          <span class="panel-badge" id="reasonBadge">Idle</span>
+        </div>
+        <div class="reasoning-body" id="reasoningBody">
+          <!-- steps injected by JS -->
+        </div>
+      </div>
+
+      <!-- Command history -->
+      <div class="panel">
+        <div class="panel-header">
+          Command History
+          <span class="panel-badge" id="histBadge">12 runs</span>
+        </div>
+        <div class="history-body" id="historyBody">
+          <!-- rows injected by JS -->
+        </div>
+      </div>
+
+    </div><!-- /right-col -->
+
+  </main>
+
+  <!-- ══ Footer ══════════════════════════════════════════════════════ -->
+  <footer>
+    <span>AccessAI Agent v0.9.1 &nbsp;·&nbsp; Screen-reader optimised &nbsp;·&nbsp; WCAG 2.2 AA</span>
+    <div class="footer-chips">
+      <span class="f-chip">🔒 Local processing</span>
+      <span class="f-chip">🧠 Bedrock Claude</span>
+      <span class="f-chip">🖥️ Computer Use</span>
+    </div>
+  </footer>
+
+</div><!-- /app -->
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════
+   Demo data
+═══════════════════════════════════════════════════════════════════ */
+
+const DEMO_SEQUENCES = [
+  {
+    transcript: [
+      "Open Gmail and",
+      "Open Gmail and check my",
+      "Open Gmail and check my latest emails"
+    ],
+    steps: [
+      { title: "Understanding intent",   detail: "Parsed: open application → compose query",                 tool: null,           state: "done"   },
+      { title: "Selecting tool",         detail: "Chose <code>computer_use</code> — browser control needed", tool: "computer_use", state: "done"   },
+      { title: "Locating Gmail",         detail: "Searching desktop shortcuts & browser bookmarks…",         tool: null,           state: "done"   },
+      { title: "Opening Gmail tab",      detail: "Navigating to mail.google.com in Chrome",                  tool: "browser_nav",  state: "active" },
+      { title: "Reading inbox",          detail: "Waiting for DOM ready, extracting thread list…",           tool: "dom_read",     state: "active" },
+    ],
+    command: { icon: "📧", bg: "rgba(79,195,247,0.1)", color: "var(--blue)", label: "Open Gmail & read inbox", detail: "chrome · 0.8 s", status: "ok" }
+  },
+  {
+    transcript: [
+      "Scroll",
+      "Scroll down the",
+      "Scroll down the page slowly"
+    ],
+    steps: [
+      { title: "Understanding intent",   detail: "Parsed: scroll action → direction down, speed slow",   tool: null,          state: "done"   },
+      { title: "Selecting tool",         detail: "Chose <code>scroll_page</code> tool",                  tool: "scroll_page", state: "done"   },
+      { title: "Calculating delta",      detail: "Speed 'slow' → 120px per step, 3 steps",              tool: null,          state: "done"   },
+      { title: "Executing scroll",       detail: "Dispatching smooth scroll events…",                    tool: "scroll_page", state: "active" },
+    ],
+    command: { icon: "↕️", bg: "rgba(105,240,174,0.1)", color: "var(--green)", label: "Scroll down slowly", detail: "browser · 0.3 s", status: "ok" }
+  },
+  {
+    transcript: [
+      "Type",
+      "Type a reply",
+      "Type a reply: Thanks for the update!"
+    ],
+    steps: [
+      { title: "Understanding intent",   detail: "Parsed: type text → target active email reply box",      tool: null,          state: "done"   },
+      { title: "Finding input field",    detail: "Vision model located reply textarea (conf: 96%)",        tool: "vision",      state: "done"   },
+      { title: "Clicking field",         detail: "Mouse click at [754, 412]",                              tool: "mouse_click", state: "done"   },
+      { title: "Typing text",            detail: "Typing: 'Thanks for the update!' at 140 wpm",            tool: "keyboard",    state: "active" },
+    ],
+    command: { icon: "⌨️", bg: "rgba(255,213,79,0.1)", color: "var(--yellow)", label: "Type reply in Gmail", detail: "keyboard · 1.1 s", status: "ok" }
+  },
+  {
+    transcript: [
+      "Take",
+      "Take a screenshot",
+      "Take a screenshot and describe what's on screen"
+    ],
+    steps: [
+      { title: "Understanding intent",   detail: "Parsed: capture + describe → vision pipeline",          tool: null,         state: "done"   },
+      { title: "Capturing screenshot",   detail: "Full display capture at 2x resolution",                 tool: "screenshot", state: "done"   },
+      { title: "Sending to vision model",detail: "Base64 image → Claude vision API",                      tool: "claude_api", state: "done"   },
+      { title: "Summarising output",     detail: "3 UI regions identified: toolbar, inbox, sidebar",       tool: "claude_api", state: "active" },
+    ],
+    command: { icon: "📸", bg: "rgba(124,77,255,0.1)", color: "#b39ddb", label: "Screenshot + describe", detail: "vision · 2.4 s", status: "ok" }
+  }
+];
+
+const SEED_HISTORY = [
+  { icon: "🌐", bg: "rgba(79,195,247,0.1)",   label: "Opened Chrome",             detail: "desktop shortcut · 0.5 s",     status: "ok"   },
+  { icon: "📁", bg: "rgba(105,240,174,0.1)",  label: "Opened file explorer",      detail: "Documents folder · 0.3 s",     status: "ok"   },
+  { icon: "🔍", bg: "rgba(255,213,79,0.1)",   label: "Google search: news",        detail: "browser · 1.1 s",              status: "ok"   },
+  { icon: "📋", bg: "rgba(255,255,255,0.07)", label: "Copied selected text",       detail: "clipboard · 0.1 s",            status: "ok"   },
+  { icon: "🖱️", bg: "rgba(124,77,255,0.1)",  label: "Right-clicked desktop",     detail: "context menu opened · 0.2 s",  status: "ok"   },
+  { icon: "🔊", bg: "rgba(255,213,79,0.1)",   label: "Volume set to 40%",          detail: "system audio · 0.2 s",         status: "ok"   },
+  { icon: "📝", bg: "rgba(105,240,174,0.1)",  label: "Opened Notepad",             detail: "Win+R · 0.4 s",                status: "ok"   },
+  { icon: "⚠️", bg: "rgba(255,213,79,0.1)",   label: "Zoom in (browser)",          detail: "Ctrl++ x2 · partial match",    status: "warn" },
+  { icon: "📧", bg: "rgba(79,195,247,0.1)",   label: "Composed email draft",       detail: "Gmail · 3.2 s",                status: "ok"   },
+  { icon: "❌", bg: "rgba(255,82,82,0.1)",    label: "Close active window",        detail: "No active window found",       status: "err"  },
+  { icon: "🗓️", bg: "rgba(105,240,174,0.1)",  label: "Opened Google Calendar",    detail: "bookmark · 0.7 s",             status: "ok"   },
+  { icon: "🔒", bg: "rgba(255,255,255,0.07)", label: "Locked screen",              detail: "Win+L · 0.1 s",                status: "ok"   },
+];
+
+/* ═══════════════════════════════════════════════════════════════════
+   State
+═══════════════════════════════════════════════════════════════════ */
+let isActive = false;
+let demoIdx   = 0;
+let demoTimer = null;
+
+/* ═══════════════════════════════════════════════════════════════════
+   Build waveform bars
+═══════════════════════════════════════════════════════════════════ */
+(function buildWaveform() {
+  const wf = document.getElementById('waveform');
+  const BARS = 48;
+  for (let i = 0; i < BARS; i++) {
+    const b = document.createElement('div');
+    b.className = 'bar';
+    const maxH  = 8 + Math.random() * 38;
+    const dur   = (0.55 + Math.random() * 0.6).toFixed(2) + 's';
+    const delay = (Math.random() * 0.5).toFixed(2) + 's';
+    b.style.setProperty('--max-h', maxH + 'px');
+    b.style.setProperty('--dur',   dur);
+    b.style.setProperty('--delay', delay);
+    wf.appendChild(b);
+  }
+})();
+
+/* ═══════════════════════════════════════════════════════════════════
+   Seed history
+═══════════════════════════════════════════════════════════════════ */
+(function seedHistory() {
+  const body = document.getElementById('historyBody');
+  SEED_HISTORY.forEach(h => body.appendChild(makeHistRow(h)));
+  updateHistBadge();
+})();
+
+function makeHistRow(h) {
+  const row = document.createElement('div');
+  row.className = 'history-row fade-new';
+  row.innerHTML = `
+    <div class="hist-icon" style="background:${h.bg}; color:${h.color||'var(--text)'}">
+      ${h.icon}
+    </div>
+    <div class="hist-content">
+      <div class="hist-cmd">${h.label}</div>
+      <div class="hist-meta">${h.detail}</div>
+    </div>
+    <div class="hist-status ${h.status}">${h.status === 'ok' ? '✓ Done' : h.status === 'warn' ? '⚠ Warn' : '✕ Fail'}</div>
+  `;
+  return row;
+}
+
+function updateHistBadge() {
+  const rows = document.querySelectorAll('.history-row').length;
+  document.getElementById('histBadge').textContent = rows + ' runs';
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Status chips
+═══════════════════════════════════════════════════════════════════ */
+function setStatus(state) {
+  document.querySelectorAll('.status-chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.state === state);
+  });
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Reasoning steps
+═══════════════════════════════════════════════════════════════════ */
+function renderSteps(steps) {
+  const body  = document.getElementById('reasoningBody');
+  body.innerHTML = '';
+  steps.forEach((s, i) => {
+    const div = document.createElement('div');
+    div.className = 'step ' + s.state;
+    div.id = 'step' + i;
+    div.innerHTML = `
+      <div class="step-num">${i + 1}</div>
+      <div class="step-body">
+        <div class="step-title">${s.title}${s.tool ? '<span class="tool-tag">' + s.tool + '</span>' : ''}</div>
+        <div class="step-detail">${s.detail}</div>
+      </div>`;
+    body.appendChild(div);
+    // stagger reveal
+    setTimeout(() => div.classList.add('visible'), i * 120);
+  });
+  document.getElementById('reasonBadge').textContent = 'Running';
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Typewriter
+═══════════════════════════════════════════════════════════════════ */
+function typeSequence(phrases, onDone) {
+  const el = document.getElementById('transcriptContent');
+  let pi = 0;
+  function showNext() {
+    if (pi >= phrases.length) { onDone && onDone(); return; }
+    el.textContent = phrases[pi++];
+    if (pi < phrases.length) setTimeout(showNext, 700 + Math.random() * 300);
+    else                      setTimeout(onDone, 400);
+  }
+  showNext();
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Full demo run
+═══════════════════════════════════════════════════════════════════ */
+function runDemo() {
+  const seq = DEMO_SEQUENCES[demoIdx % DEMO_SEQUENCES.length];
+  demoIdx++;
+
+  // Phase 1: Listening
+  setStatus('listening');
+  document.getElementById('micLabel').textContent = 'Listening…';
+
+  // Add blinking cursor
+  const cursor = document.createElement('span');
+  cursor.className = 'cursor';
+  document.getElementById('transcriptText').appendChild(cursor);
+
+  typeSequence(seq.transcript, () => {
+    // Phase 2: Processing
+    setStatus('processing');
+    document.getElementById('micLabel').textContent = 'Processing…';
+    renderSteps(seq.steps);
+
+    setTimeout(() => {
+      // Phase 3: Executing
+      setStatus('executing');
+      document.getElementById('micLabel').textContent = 'Executing…';
+
+      setTimeout(() => {
+        // Phase 4: Complete
+        setStatus('complete');
+        document.getElementById('micLabel').textContent = 'Complete ✓';
+        document.getElementById('reasonBadge').textContent = 'Done';
+
+        // Mark all steps done
+        document.querySelectorAll('.step.active').forEach(s => {
+          s.classList.remove('active');
+          s.classList.add('done');
+        });
+
+        // Add to history
+        const hBody = document.getElementById('historyBody');
+        const newRow = makeHistRow(seq.command);
+        hBody.insertBefore(newRow, hBody.firstChild);
+        updateHistBadge();
+
+        // Reset after a moment
+        setTimeout(() => {
+          if (isActive) {
+            // run next demo automatically
+            runDemo();
+          } else {
+            resetUI();
+          }
+        }, 2800);
+
+      }, 2200);
+    }, 1800);
+  });
+}
+
+function resetUI() {
+  document.getElementById('micBtn').classList.remove('active');
+  document.getElementById('micRing').classList.remove('active');
+  document.getElementById('waveform').classList.remove('active');
+  document.getElementById('micLabel').textContent = 'Click to speak';
+  document.getElementById('transcriptContent').textContent = 'Tap the mic and speak a command…';
+  // remove cursor if present
+  const cur = document.querySelector('.cursor');
+  if (cur) cur.remove();
+  setStatus(null);
+  document.getElementById('reasonBadge').textContent = 'Idle';
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   Mic button toggle
+═══════════════════════════════════════════════════════════════════ */
+document.getElementById('micBtn').addEventListener('click', () => {
+  isActive = !isActive;
+
+  const btn  = document.getElementById('micBtn');
+  const ring = document.getElementById('micRing');
+  const wf   = document.getElementById('waveform');
+
+  if (isActive) {
+    btn.classList.add('active');
+    ring.classList.add('active');
+    wf.classList.add('active');
+    runDemo();
+  } else {
+    btn.classList.remove('active');
+    ring.classList.remove('active');
+    wf.classList.remove('active');
+    resetUI();
+  }
+});
+
+/* ═══════════════════════════════════════════════════════════════════
+   Keyboard accessibility
+═══════════════════════════════════════════════════════════════════ */
+document.getElementById('micBtn').addEventListener('keydown', e => {
+  if (e.key === 'Enter' || e.key === ' ') {
+    e.preventDefault();
+    document.getElementById('micBtn').click();
+  }
+});
+</script>
+</body>
+</html>
