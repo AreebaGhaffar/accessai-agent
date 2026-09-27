@@ -28,7 +28,7 @@ response = client.converse(
     messages=[
         {
             "role": "user",
-            "content": [{"text": "Say hello and confirm you are Claude Haiku 4.5"}],
+            "content": [{"text": "The user said: 'Open my browser and go to Gmail'. Respond ONLY with a JSON object with two fields: 'action' (one of: open_browser, click, type_text, scroll, read_screen) and 'target' (what to open/click/type, e.g. a URL or text). No explanation, just the JSON."}],
         }
     ],
     inferenceConfig={"maxTokens": 512},
