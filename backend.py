@@ -28,13 +28,25 @@ app.add_middleware(
 
 MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
+import datetime as _dt
+
 _bedrock_client = None
+_creds_expiry: _dt.datetime | None = None
 
 
 def get_bedrock_client():
-    """Return a cached Bedrock runtime client using AWS CLI credentials."""
-    global _bedrock_client
-    if _bedrock_client is not None:
+    """Return a Bedrock runtime client, refreshing credentials when they are
+    within 60 seconds of expiry or have already expired."""
+    global _bedrock_client, _creds_expiry
+
+    now = _dt.datetime.now(_dt.timezone.utc)
+    needs_refresh = (
+        _bedrock_client is None
+        or _creds_expiry is None
+        or (_creds_expiry - now).total_seconds() < 60
+    )
+
+    if not needs_refresh:
         return _bedrock_client
 
     result = subprocess.run(
@@ -44,6 +56,14 @@ def get_bedrock_client():
         check=True,
     )
     creds = json.loads(result.stdout)
+
+    # Parse expiry if present (temporary credentials include an Expiration field)
+    expiry_str = creds.get("Expiration")
+    if expiry_str:
+        _creds_expiry = _dt.datetime.fromisoformat(expiry_str.replace("Z", "+00:00"))
+    else:
+        # Long-term keys don't expire; set a far-future sentinel
+        _creds_expiry = now + _dt.timedelta(hours=12)
 
     session = boto3.Session(
         aws_access_key_id=creds["AccessKeyId"],
@@ -63,87 +83,209 @@ class CommandRequest(BaseModel):
     text: str
 
 
-class CommandResponse(BaseModel):
+class StepResult(BaseModel):
     action: str
     target: str
     status: str
 
 
+class CommandResponse(BaseModel):
+    steps: list[StepResult]
+    overall_status: str
+
+
 # ---------------------------------------------------------------------------
-# Helper: call Claude and parse the JSON action
+# Helper: call Claude and parse the JSON step list
 # ---------------------------------------------------------------------------
 
-SYSTEM_PROMPT = (
-    "You are a computer-automation assistant. "
-    "When given a natural-language instruction, respond ONLY with a JSON object "
-    "containing exactly two fields: "
-    "'action' (one of: open_browser, click, type_text, scroll, read_screen) and "
-    "'target' (what to open/click/type, e.g. a URL or text). "
-    "No explanation, no markdown fences — just the raw JSON."
-)
+SYSTEM_PROMPT = """You are a computer-automation assistant that can control any app, \
+website, or desktop program.
+
+When given a natural-language instruction you MUST:
+1. Reason about what application or website is involved and, if it is a website, \
+   determine its most likely URL from general knowledge (e.g. Instagram → \
+   https://www.instagram.com, Gmail → https://mail.google.com, \
+   Netflix → https://www.netflix.com, etc.).
+2. Break the instruction into an ordered sequence of atomic steps needed to \
+   complete it end-to-end (e.g. open the browser first, then scroll, then click, etc.).
+3. Return ONLY a JSON object with a single key "steps" whose value is an array. \
+   Each element is an object with exactly two string fields:
+     "action" — one of: open_browser | click | type_text | scroll | \
+                         key_press | wait | read_screen
+     "target" — what to act on (a URL, button label, text to type, key name, \
+                  scroll direction, wait duration in ms, etc.)
+
+Rules:
+- Never hardcode logic for specific apps — figure out URLs and UI flows \
+  dynamically from general knowledge.
+- Always start with open_browser + the correct URL when the task involves a \
+  website or web app.
+- Use wait steps (target: "1500") between actions that require a page to load.
+- No explanation, no markdown fences — respond with raw JSON only.
+
+Example for "open Instagram and scroll down":
+{"steps":[{"action":"open_browser","target":"https://www.instagram.com"},{"action":"wait","target":"2000"},{"action":"scroll","target":"down"}]}"""
 
 
-def ask_claude(user_text: str) -> dict:
-    """Send user_text to Claude Haiku via Bedrock and return parsed action dict."""
+def ask_claude(user_text: str) -> list[dict]:
+    """Send user_text to Claude via Bedrock and return a list of action dicts."""
     client = get_bedrock_client()
-
-    prompt = f"The user said: '{user_text}'. {SYSTEM_PROMPT}"
 
     response = client.converse(
         modelId=MODEL_ID,
+        system=[{"text": SYSTEM_PROMPT}],
         messages=[
             {
                 "role": "user",
-                "content": [{"text": prompt}],
+                "content": [{"text": user_text}],
             }
         ],
-        inferenceConfig={"maxTokens": 512},
+        inferenceConfig={"maxTokens": 1024},
     )
 
     reply = response["output"]["message"]["content"][0]["text"]
 
-    # Strip markdown code fences if Claude wrapped the JSON in ```json … ```
+    # Strip markdown code fences if Claude wrapped the JSON
     clean = reply.strip()
     if clean.startswith("```"):
         lines = clean.splitlines()
         inner = [line for line in lines[1:] if not line.strip().startswith("```")]
         clean = "\n".join(inner).strip()
 
-    return json.loads(clean)
+    data = json.loads(clean)
+
+    # Accept both {"steps": [...]} and a bare list
+    if isinstance(data, list):
+        return data
+    return data.get("steps", [data])  # fallback: treat root object as single step
 
 
 # ---------------------------------------------------------------------------
-# Helper: execute the action locally
+# Helper: execute a single action step
 # ---------------------------------------------------------------------------
 
-def execute_action(action: str, target: str) -> str:
-    """Execute the resolved action and return a status string."""
+import time       # noqa: E402
+import platform   # noqa: E402
+
+
+def _focus_browser_window() -> None:
+    """Best-effort: bring the most recently opened browser window to the
+    foreground on Windows so subsequent pyautogui calls land inside it."""
+    if platform.system() != "Windows":
+        return
+    try:
+        subprocess.run(
+            [
+                "powershell", "-NoProfile", "-Command",
+                "$wsh = New-Object -ComObject WScript.Shell; "
+                "$proc = Get-Process | Where-Object { $_.MainWindowTitle -match "
+                "'Chrome|Firefox|Edge|Instagram|Gmail|Opera|Brave' } | "
+                "Sort-Object CPU -Descending | Select-Object -First 1; "
+                "if ($proc) { $wsh.AppActivate($proc.Id) }",
+            ],
+            capture_output=True,
+            timeout=5,
+        )
+        time.sleep(0.4)          # let the OS finish the focus transition
+    except Exception:
+        pass
+
+
+def execute_step(action: str, target: str) -> str:
+    """Execute one action step and return a status string."""
+
+    # ── open_browser ────────────────────────────────────────────────────
     if action == "open_browser":
         webbrowser.open(target)
+        # Give the OS time to actually open/focus the browser window before
+        # any follow-up steps (scroll, click, type) run against it.
+        time.sleep(1.0)
         return "executed"
 
-    if action == "scroll":
-        # negative = scroll down
-        pyautogui.scroll(-500)
-        return "executed"
-
-    if action == "type_text":
-        pyautogui.write(target, interval=0.05)
-        return "executed"
-
-    if action == "click":
-        # Locate and click if target is a screen label; fall back gracefully
+    # ── wait ────────────────────────────────────────────────────────────
+    if action == "wait":
         try:
-            location = pyautogui.locateCenterOnScreen(target, confidence=0.8)
-            if location:
-                pyautogui.click(location)
-                return "executed"
+            ms = int(target)
+        except (ValueError, TypeError):
+            ms = 1000
+        time.sleep(ms / 1000)
+        return "executed"
+
+    # ── scroll ──────────────────────────────────────────────────────────
+    if action == "scroll":
+        # Ensure the browser has focus, then move the mouse to the centre of
+        # the screen so pyautogui.scroll() lands inside the page content area.
+        _focus_browser_window()
+        sw, sh = pyautogui.size()
+        pyautogui.moveTo(sw // 2, sh // 2, duration=0.15)
+        time.sleep(0.2)
+        # pyautogui.scroll(): positive = up, negative = down
+        clicks = -5 if target.lower() in ("down", "scroll down", "") else 5
+        pyautogui.scroll(clicks)
+        return "executed"
+
+    # ── type_text ───────────────────────────────────────────────────────
+    if action == "type_text":
+        # pyautogui.write() silently drops non-ASCII characters.
+        # Use clipboard paste instead so the full string always arrives.
+        try:
+            import pyperclip
+            pyperclip.copy(target)
+            pyautogui.hotkey("ctrl", "v")
         except Exception:
-            pass
+            pyautogui.write(target, interval=0.04)
+        return "executed"
+
+    # ── key_press ───────────────────────────────────────────────────────
+    if action == "key_press":
+        pyautogui.press(target)
+        return "executed"
+
+    # ── click ───────────────────────────────────────────────────────────
+    if action == "click":
+        # Claude passes human-readable labels ("Compose", "To", "Send").
+        # Image-based locateCenterOnScreen needs an image file, not a label,
+        # so it will always fail.  Use Windows UI Automation to find the
+        # element by its accessible name instead.
+        _focus_browser_window()
+        if platform.system() == "Windows":
+            try:
+                ps_script = (
+                    "Add-Type -AssemblyName UIAutomationClient; "
+                    "Add-Type -AssemblyName UIAutomationTypes; "
+                    "$root = [System.Windows.Automation.AutomationElement]::RootElement; "
+                    f"$cond = New-Object System.Windows.Automation.PropertyCondition("
+                    f"  [System.Windows.Automation.AutomationElement]::NameProperty, '{target}'); "
+                    "$el = $root.FindFirst("
+                    "  [System.Windows.Automation.TreeScope]::Descendants, $cond); "
+                    "if ($el) { "
+                    "  $pt = $el.GetClickablePoint(); "
+                    "  Add-Type -AssemblyName System.Windows.Forms; "
+                    "  [System.Windows.Forms.Cursor]::Position = "
+                    "    [System.Drawing.Point]::new([int]$pt.X, [int]$pt.Y); "
+                    "  Start-Sleep -Milliseconds 100; "
+                    "  Add-Type -TypeDefinition '"
+                    "    using System; using System.Runtime.InteropServices; "
+                    "    public class Clicker { "
+                    "      [DllImport(\"user32.dll\")] public static extern void mouse_event(int f,int x,int y,int d,int e); "
+                    "    }'; "
+                    "  [Clicker]::mouse_event(2,0,0,0,0); "   # MOUSEEVENTF_LEFTDOWN
+                    "  [Clicker]::mouse_event(4,0,0,0,0); "   # MOUSEEVENTF_LEFTUP
+                    "  Write-Output 'found' "
+                    "} else { Write-Output 'not_found' }"
+                )
+                result = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", ps_script],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if "found" in result.stdout:
+                    return "executed"
+            except Exception:
+                pass
         return "not_found"
 
+    # ── read_screen ─────────────────────────────────────────────────────
     if action == "read_screen":
-        # Placeholder — actual OCR would go here
         return "not_implemented"
 
     return "unknown_action"
@@ -156,14 +298,15 @@ def execute_action(action: str, target: str) -> str:
 @app.post("/command", response_model=CommandResponse)
 async def handle_command(req: CommandRequest):
     """
-    Accept a natural-language command, translate it via Claude Haiku,
-    execute the resulting action, and return the outcome.
+    Accept a natural-language command, let Claude reason out the full
+    step sequence for whatever app/website is involved, execute every
+    step in order, and return the per-step outcomes.
     """
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="'text' must not be empty.")
 
     try:
-        data = ask_claude(req.text)
+        steps = ask_claude(req.text)
     except subprocess.CalledProcessError as exc:
         raise HTTPException(
             status_code=503,
@@ -177,12 +320,18 @@ async def handle_command(req: CommandRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
 
-    action = data.get("action", "unknown")
-    target = data.get("target", "")
+    results: list[StepResult] = []
+    overall = "executed"
 
-    status = execute_action(action, target)
+    for step in steps:
+        action = step.get("action", "unknown")
+        target = step.get("target", "")
+        status = execute_step(action, target)
+        results.append(StepResult(action=action, target=target, status=status))
+        if status not in ("executed", "not_implemented"):
+            overall = "partial"
 
-    return CommandResponse(action=action, target=target, status=status)
+    return CommandResponse(steps=results, overall_status=overall)
 
 
 # ---------------------------------------------------------------------------

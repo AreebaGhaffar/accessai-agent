@@ -238,7 +238,7 @@
     const spinner     = document.getElementById('spinner');
     const placeholder = document.getElementById('response-placeholder');
 
-    const BACKEND_URL = 'http://localhost:8001/command';
+    const BACKEND_URL = 'http://localhost:8000/command';
 
     // ── Send transcript to backend ──────────────────────────────────────────
     async function sendToBackend(text) {
@@ -286,7 +286,7 @@
 
         let message;
         if (err instanceof TypeError && err.message.toLowerCase().includes('fetch')) {
-          message = 'Could not reach the backend. Is it running on localhost:8001?';
+          message = 'Could not reach the backend. Is it running on localhost:8000?';
         } else {
           message = err.message;
         }

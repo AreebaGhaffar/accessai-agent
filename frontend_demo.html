@@ -623,6 +623,24 @@
 ═══════════════════════════════════════════════════════════════════ */
 
 const DEMO_SEQUENCES = [
+  // ── NEW: Instagram scroll (the test case) ──────────────────────────────
+  {
+    transcript: [
+      "Open Instagram",
+      "Open Instagram and",
+      "Open Instagram and scroll down"
+    ],
+    steps: [
+      { title: "Understanding intent",    detail: "Parsed: open website → scroll feed downward",                      tool: null,          state: "done"   },
+      { title: "Resolving URL",           detail: "Instagram → <code>https://www.instagram.com</code>",               tool: null,          state: "done"   },
+      { title: "Opening browser",         detail: "Launching instagram.com in default browser",                        tool: "open_browser",state: "done"   },
+      { title: "Waiting for page load",   detail: "Pausing 2 000 ms for DOM + images to settle",                      tool: "wait",        state: "done"   },
+      { title: "Scrolling feed",          detail: "Dispatching scroll(-500) → feed advances one viewport",            tool: "scroll",      state: "active" },
+    ],
+    command: { icon: "📸", bg: "rgba(193,53,132,0.12)", color: "#e1306c", label: "Open Instagram & scroll", detail: "browser · 2.3 s", status: "ok" }
+  },
+
+  // ── Gmail ──────────────────────────────────────────────────────────────
   {
     transcript: [
       "Open Gmail and",
@@ -630,14 +648,16 @@ const DEMO_SEQUENCES = [
       "Open Gmail and check my latest emails"
     ],
     steps: [
-      { title: "Understanding intent",   detail: "Parsed: open application → compose query",                 tool: null,           state: "done"   },
-      { title: "Selecting tool",         detail: "Chose <code>computer_use</code> — browser control needed", tool: "computer_use", state: "done"   },
-      { title: "Locating Gmail",         detail: "Searching desktop shortcuts & browser bookmarks…",         tool: null,           state: "done"   },
-      { title: "Opening Gmail tab",      detail: "Navigating to mail.google.com in Chrome",                  tool: "browser_nav",  state: "active" },
-      { title: "Reading inbox",          detail: "Waiting for DOM ready, extracting thread list…",           tool: "dom_read",     state: "active" },
+      { title: "Understanding intent",    detail: "Parsed: open web app → read inbox",                                 tool: null,           state: "done"   },
+      { title: "Resolving URL",           detail: "Gmail → <code>https://mail.google.com</code>",                      tool: null,           state: "done"   },
+      { title: "Opening browser",         detail: "Navigating to mail.google.com",                                     tool: "open_browser", state: "done"   },
+      { title: "Waiting for page load",   detail: "Pausing 2 000 ms for inbox to render",                              tool: "wait",         state: "done"   },
+      { title: "Reading inbox",           detail: "Extracting thread list from DOM…",                                  tool: "read_screen",  state: "active" },
     ],
-    command: { icon: "📧", bg: "rgba(79,195,247,0.1)", color: "var(--blue)", label: "Open Gmail & read inbox", detail: "chrome · 0.8 s", status: "ok" }
+    command: { icon: "📧", bg: "rgba(79,195,247,0.1)", color: "var(--blue)", label: "Open Gmail & read inbox", detail: "browser · 0.8 s", status: "ok" }
   },
+
+  // ── Generic scroll ─────────────────────────────────────────────────────
   {
     transcript: [
       "Scroll",
@@ -645,13 +665,15 @@ const DEMO_SEQUENCES = [
       "Scroll down the page slowly"
     ],
     steps: [
-      { title: "Understanding intent",   detail: "Parsed: scroll action → direction down, speed slow",   tool: null,          state: "done"   },
-      { title: "Selecting tool",         detail: "Chose <code>scroll_page</code> tool",                  tool: "scroll_page", state: "done"   },
-      { title: "Calculating delta",      detail: "Speed 'slow' → 120px per step, 3 steps",              tool: null,          state: "done"   },
-      { title: "Executing scroll",       detail: "Dispatching smooth scroll events…",                    tool: "scroll_page", state: "active" },
+      { title: "Understanding intent",    detail: "Parsed: scroll → direction: down, speed: slow",                     tool: null,          state: "done"   },
+      { title: "Selecting tool",          detail: "Chose <code>scroll</code> — no browser nav needed",                 tool: "scroll",      state: "done"   },
+      { title: "Calculating delta",       detail: "Speed 'slow' → 120 px per step × 3 steps",                         tool: null,          state: "done"   },
+      { title: "Executing scroll",        detail: "Dispatching smooth scroll events…",                                 tool: "scroll",      state: "active" },
     ],
     command: { icon: "↕️", bg: "rgba(105,240,174,0.1)", color: "var(--green)", label: "Scroll down slowly", detail: "browser · 0.3 s", status: "ok" }
   },
+
+  // ── Type reply ─────────────────────────────────────────────────────────
   {
     transcript: [
       "Type",
@@ -659,13 +681,15 @@ const DEMO_SEQUENCES = [
       "Type a reply: Thanks for the update!"
     ],
     steps: [
-      { title: "Understanding intent",   detail: "Parsed: type text → target active email reply box",      tool: null,          state: "done"   },
-      { title: "Finding input field",    detail: "Vision model located reply textarea (conf: 96%)",        tool: "vision",      state: "done"   },
-      { title: "Clicking field",         detail: "Mouse click at [754, 412]",                              tool: "mouse_click", state: "done"   },
-      { title: "Typing text",            detail: "Typing: 'Thanks for the update!' at 140 wpm",            tool: "keyboard",    state: "active" },
+      { title: "Understanding intent",    detail: "Parsed: type text → active reply box",                              tool: null,          state: "done"   },
+      { title: "Finding input field",     detail: "Vision model located reply textarea (conf: 96 %)",                  tool: "vision",      state: "done"   },
+      { title: "Clicking field",          detail: "Mouse click at [754, 412]",                                         tool: "click",       state: "done"   },
+      { title: "Typing text",             detail: "Typing: 'Thanks for the update!' at 140 wpm",                       tool: "type_text",   state: "active" },
     ],
-    command: { icon: "⌨️", bg: "rgba(255,213,79,0.1)", color: "var(--yellow)", label: "Type reply in Gmail", detail: "keyboard · 1.1 s", status: "ok" }
+    command: { icon: "⌨️", bg: "rgba(255,213,79,0.1)", color: "var(--yellow)", label: "Type reply", detail: "keyboard · 1.1 s", status: "ok" }
   },
+
+  // ── Screenshot ─────────────────────────────────────────────────────────
   {
     transcript: [
       "Take",
@@ -673,12 +697,12 @@ const DEMO_SEQUENCES = [
       "Take a screenshot and describe what's on screen"
     ],
     steps: [
-      { title: "Understanding intent",   detail: "Parsed: capture + describe → vision pipeline",          tool: null,         state: "done"   },
-      { title: "Capturing screenshot",   detail: "Full display capture at 2x resolution",                 tool: "screenshot", state: "done"   },
-      { title: "Sending to vision model",detail: "Base64 image → Claude vision API",                      tool: "claude_api", state: "done"   },
-      { title: "Summarising output",     detail: "3 UI regions identified: toolbar, inbox, sidebar",       tool: "claude_api", state: "active" },
+      { title: "Understanding intent",    detail: "Parsed: capture + describe → vision pipeline",                      tool: null,          state: "done"   },
+      { title: "Capturing screenshot",    detail: "Full display capture at 2× resolution",                             tool: "screenshot",  state: "done"   },
+      { title: "Sending to vision model", detail: "Base64 image → Claude vision API",                                  tool: "claude_api",  state: "done"   },
+      { title: "Summarising output",      detail: "3 UI regions identified: toolbar, feed, sidebar",                   tool: "claude_api",  state: "active" },
     ],
-    command: { icon: "📸", bg: "rgba(124,77,255,0.1)", color: "#b39ddb", label: "Screenshot + describe", detail: "vision · 2.4 s", status: "ok" }
+    command: { icon: "📷", bg: "rgba(124,77,255,0.1)", color: "#b39ddb", label: "Screenshot + describe", detail: "vision · 2.4 s", status: "ok" }
   }
 ];
 
