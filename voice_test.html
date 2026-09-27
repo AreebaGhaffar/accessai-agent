@@ -19,6 +19,7 @@
       min-height: 100vh;
       background: #f0f0f0;
       font-family: sans-serif;
+      padding: 40px 16px;
     }
 
     h1 {
@@ -99,6 +100,100 @@
       background: #eee;
     }
 
+    /* ── Response section ── */
+    #response-section {
+      margin-top: 28px;
+      width: 90%;
+      max-width: 600px;
+    }
+
+    #response-section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #444;
+      margin-bottom: 12px;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    #response-box {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      font-size: 1rem;
+      color: #333;
+      line-height: 1.6;
+      min-height: 80px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      position: relative;
+    }
+
+    #response-box.sending {
+      opacity: 0.6;
+    }
+
+    .response-placeholder {
+      color: #bbb;
+      font-style: italic;
+    }
+
+    .response-row {
+      display: flex;
+      align-items: baseline;
+      gap: 10px;
+    }
+
+    .response-label {
+      font-size: 0.78rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      min-width: 52px;
+      color: #888;
+    }
+
+    .response-value {
+      font-size: 1rem;
+      color: #222;
+      word-break: break-word;
+    }
+
+    #response-box.success .response-label {
+      color: #2e7d32;
+    }
+
+    #response-box.error-state {
+      border-left: 4px solid #c62828;
+    }
+
+    #response-box.error-state .response-label {
+      color: #c62828;
+    }
+
+    .spinner {
+      display: none;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #e0e0e0;
+      border-top-color: #1a73e8;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      position: absolute;
+      top: 20px;
+      right: 20px;
+    }
+
+    .spinner.active {
+      display: block;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
     #unsupported {
       display: none;
       color: #c0392b;
@@ -121,6 +216,15 @@
 
   <button id="clear-btn">Clear</button>
 
+  <!-- Backend response section -->
+  <section id="response-section">
+    <h2>Backend Response</h2>
+    <div id="response-box">
+      <div class="spinner" id="spinner"></div>
+      <p class="response-placeholder" id="response-placeholder">Waiting for a command…</p>
+    </div>
+  </section>
+
   <p id="unsupported">⚠️ Your browser does not support the Web Speech API. Try Chrome or Edge.</p>
 
   <script>
@@ -130,7 +234,81 @@
     const interimText = document.getElementById('interim-text');
     const clearBtn    = document.getElementById('clear-btn');
     const unsupported = document.getElementById('unsupported');
+    const responseBox = document.getElementById('response-box');
+    const spinner     = document.getElementById('spinner');
+    const placeholder = document.getElementById('response-placeholder');
 
+    const BACKEND_URL = 'http://localhost:8001/command';
+
+    // ── Send transcript to backend ──────────────────────────────────────────
+    async function sendToBackend(text) {
+      // Show loading state
+      responseBox.className = 'sending';
+      spinner.classList.add('active');
+      placeholder.style.display = 'none';
+
+      // Remove any previous response rows
+      responseBox.querySelectorAll('.response-row').forEach(el => el.remove());
+
+      try {
+        const res = await fetch(BACKEND_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text }),
+        });
+
+        if (!res.ok) {
+          throw new Error(`Server responded with ${res.status} ${res.statusText}`);
+        }
+
+        const data = await res.json();
+
+        // Render response fields
+        const fields = [
+          { label: 'Action',  value: data.action  ?? '—' },
+          { label: 'Target',  value: data.target  ?? '—' },
+          { label: 'Status',  value: data.status  ?? '—' },
+        ];
+
+        fields.forEach(({ label, value }) => {
+          const row = document.createElement('div');
+          row.className = 'response-row';
+          row.innerHTML = `<span class="response-label">${label}</span>
+                           <span class="response-value">${escapeHtml(String(value))}</span>`;
+          responseBox.appendChild(row);
+        });
+
+        responseBox.className = 'success';
+
+      } catch (err) {
+        const row = document.createElement('div');
+        row.className = 'response-row';
+
+        let message;
+        if (err instanceof TypeError && err.message.toLowerCase().includes('fetch')) {
+          message = 'Could not reach the backend. Is it running on localhost:8001?';
+        } else {
+          message = err.message;
+        }
+
+        row.innerHTML = `<span class="response-label">Error</span>
+                         <span class="response-value">${escapeHtml(message)}</span>`;
+        responseBox.appendChild(row);
+        responseBox.className = 'error-state';
+      } finally {
+        spinner.classList.remove('active');
+      }
+    }
+
+    function escapeHtml(str) {
+      return str
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    // ── Speech recognition ──────────────────────────────────────────────────
     const SpeechRecognition =
       window.SpeechRecognition || window.webkitSpeechRecognition;
 
@@ -145,31 +323,67 @@
       recognition.interimResults  = true;
       recognition.lang            = 'en-US';
 
-      let listening = false;
+      // true while the user wants to keep recording (set by button clicks)
+      let userWantsListening = false;
+      // accumulates all finalised segments during one recording session
+      let accumulatedFinal   = '';
+
+      function startRecognition() {
+        try { recognition.start(); } catch (_) { /* already started */ }
+      }
 
       micBtn.addEventListener('click', () => {
-        if (listening) {
-          recognition.stop();
+        if (!userWantsListening) {
+          // ── First click: begin recording ──────────────────────────────
+          userWantsListening = true;
+          accumulatedFinal   = '';
+          finalText.textContent   = '';
+          interimText.textContent = '';
+          micBtn.classList.add('listening');
+          status.textContent = 'Listening… click mic to stop';
+          startRecognition();
         } else {
-          recognition.start();
+          // ── Second click: stop recording then send ────────────────────
+          userWantsListening = false;
+          recognition.stop();   // onend will fire; we send from there
         }
       });
 
       recognition.onstart = () => {
-        listening = true;
-        micBtn.classList.add('listening');
-        status.textContent = 'Listening…';
+        // Keep UI in sync when the recogniser (re)starts internally
+        if (userWantsListening) {
+          micBtn.classList.add('listening');
+          status.textContent = 'Listening… click mic to stop';
+        }
       };
 
       recognition.onend = () => {
-        listening = false;
-        micBtn.classList.remove('listening');
-        status.textContent = 'Click the mic to start';
-        interimText.textContent = '';
+        if (userWantsListening) {
+          // Browser ended the session on its own (silence timeout, etc.)
+          // Restart immediately so the user doesn't have to click again.
+          startRecognition();
+        } else {
+          // User clicked stop — send the full accumulated transcript
+          micBtn.classList.remove('listening');
+          interimText.textContent = '';
+
+          const textToSend = accumulatedFinal.trim();
+          if (textToSend) {
+            status.textContent = 'Sending…';
+            sendToBackend(textToSend).then(() => {
+              status.textContent = 'Click the mic to start';
+            });
+          } else {
+            status.textContent = 'Click the mic to start';
+          }
+        }
       };
 
       recognition.onerror = (e) => {
-        listening = false;
+        // 'no-speech' is normal during pauses — just let onend restart us
+        if (e.error === 'no-speech' || e.error === 'aborted') return;
+
+        userWantsListening = false;
         micBtn.classList.remove('listening');
         status.textContent = 'Error: ' + e.error;
         interimText.textContent = '';
@@ -177,24 +391,29 @@
 
       recognition.onresult = (e) => {
         let interim = '';
-        let final   = finalText.textContent;
 
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const transcript = e.results[i][0].transcript;
           if (e.results[i].isFinal) {
-            final += transcript + ' ';
+            accumulatedFinal += transcript + ' ';
           } else {
             interim += transcript;
           }
         }
 
-        finalText.textContent   = final;
+        // Show live transcript — finals stay, interim follows the cursor
+        finalText.textContent   = accumulatedFinal;
         interimText.textContent = interim;
       };
 
       clearBtn.addEventListener('click', () => {
+        accumulatedFinal        = '';
         finalText.textContent   = '';
         interimText.textContent = '';
+        // Reset response box
+        responseBox.querySelectorAll('.response-row').forEach(el => el.remove());
+        responseBox.className = '';
+        placeholder.style.display = '';
       });
     }
   </script>

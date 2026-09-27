@@ -190,6 +190,18 @@ async def handle_command(req: CommandRequest):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
+    import sys
+    import os
+
+    # Ensure we are running inside the project's virtual environment.
+    # If not, re-exec with the venv interpreter so all dependencies are available.
+    venv_python = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        ".venv", "Scripts", "python.exe",
+    )
+    if os.path.exists(venv_python) and sys.executable != os.path.normcase(venv_python):
+        os.execv(venv_python, [venv_python] + sys.argv)
+
     import uvicorn
 
     uvicorn.run("backend:app", host="0.0.0.0", port=8000, reload=True)
