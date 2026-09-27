@@ -21,7 +21,7 @@ session = boto3.Session(
 
 client = session.client("bedrock-runtime")
 
-MODEL_ID = "anthropic.claude-haiku-4-5-20251001-v1:0"
+MODEL_ID = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
 response = client.converse(
     modelId=MODEL_ID,
