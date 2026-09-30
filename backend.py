@@ -1,6 +1,7 @@
 import subprocess
 import json
 import webbrowser
+import urllib.parse
 
 import boto3
 import pyautogui
@@ -111,9 +112,9 @@ When given a natural-language instruction you MUST:
 3. Return ONLY a JSON object with a single key "steps" whose value is an array. \
    Each element is an object with exactly two string fields:
      "action" — one of: open_browser | click | type_text | scroll | \
-                         key_press | wait | read_screen
+                         key_press | wait | read_screen | compose_email
      "target" — what to act on (a URL, button label, text to type, key name, \
-                  scroll direction, wait duration in ms, etc.)
+                  scroll direction, wait duration in ms, or a JSON string for compose_email)
 
 Rules:
 - Never hardcode logic for specific apps — figure out URLs and UI flows \
@@ -123,8 +124,21 @@ Rules:
 - Use wait steps (target: "1500") between actions that require a page to load.
 - No explanation, no markdown fences — respond with raw JSON only.
 
+SPECIAL RULE — sending email via Gmail:
+When the task involves sending an email through Gmail, you MUST use ONLY the \
+compose_email action — do NOT add open_browser or wait steps before it. \
+The compose_email action opens Gmail itself via a pre-filled URL internally. \
+The target for compose_email must be a JSON string with keys: \
+"to", "subject" (optional), "body" (optional).
+Example: {"action":"compose_email","target":"{\\"to\\":\\"user@example.com\\",\\"subject\\":\\"Hello\\",\\"body\\":\\"Hi there\\"}"}
+The full step list for a Gmail send task is just ONE step:
+  1. compose_email → JSON string with to/subject/body
+
 Example for "open Instagram and scroll down":
-{"steps":[{"action":"open_browser","target":"https://www.instagram.com"},{"action":"wait","target":"2000"},{"action":"scroll","target":"down"}]}"""
+{"steps":[{"action":"open_browser","target":"https://www.instagram.com"},{"action":"wait","target":"2000"},{"action":"scroll","target":"down"}]}
+
+Example for "open gmail and send mail to bob@example.com saying hello":
+{"steps":[{"action":"compose_email","target":"{\\"to\\":\\"bob@example.com\\",\\"subject\\":\\"hello\\",\\"body\\":\\"hello\\"}"}]}"""
 
 
 def ask_claude(user_text: str) -> list[dict]:
@@ -283,6 +297,100 @@ def execute_step(action: str, target: str) -> str:
             except Exception:
                 pass
         return "not_found"
+
+    # ── compose_email ────────────────────────────────────────────────────
+    if action == "compose_email":
+        """
+        Opens Gmail's pre-filled compose URL, waits for the compose box to
+        render (verified via screenshot), then sends with Ctrl+Enter.
+
+        URL approach: https://mail.google.com/mail/?view=cm&fs=1&to=X&su=Y&tf=1&body=Z
+        Gmail populates To/Subject/Body from the query parameters automatically —
+        no clicking into fields, no clipboard paste, no coordinate guessing.
+
+        target: JSON string with keys "to", "subject" (optional), "body" (optional).
+        """
+        try:
+            params = json.loads(target) if isinstance(target, str) else target
+        except (json.JSONDecodeError, TypeError):
+            return "invalid_compose_params"
+
+        to_addr = params.get("to", "").strip()
+        subject = params.get("subject", "").strip()
+        body    = params.get("body", "").strip()
+
+        if not to_addr:
+            return "missing_to_address"
+
+        from PIL import ImageStat
+
+        # ── Step 1: build the pre-filled compose URL ───────────────────────
+        # tf=1  → open in full compose window (not pop-up mini-compose)
+        # fs=1  → full-screen compose
+        qs = urllib.parse.urlencode({
+            "view": "cm",
+            "fs":   "1",
+            "tf":   "1",
+            "to":   to_addr,
+            "su":   subject,
+            "body": body,
+        })
+        compose_url = f"https://mail.google.com/mail/?{qs}"
+
+        # ── Step 2: open the URL — Gmail renders a pre-filled compose box ──
+        webbrowser.open(compose_url)
+        time.sleep(1.0)   # give the OS a moment to hand off to the browser
+
+        # ── Step 3: wait for the browser window to come to the front ───────
+        _focus_browser_window()
+
+        # ── Step 4: wait for the compose box to render (up to 12 s) ────────
+        # We detect it by sampling the bottom-right quadrant of the screen —
+        # Gmail's compose box (dark header ~#404040) darkens that region.
+        sw, sh = pyautogui.size()
+
+        def _sample_brightness(left, top, width, height):
+            try:
+                img = pyautogui.screenshot(region=(left, top, width, height))
+                return ImageStat.Stat(img.convert("L")).mean[0]
+            except Exception:
+                return 200.0  # assume bright (not loaded) on error
+
+        def _compose_visible():
+            b = _sample_brightness(sw // 2, sh // 2, sw // 2, sh // 2)
+            return b < 110   # compose header darkens this area
+
+        compose_ready = False
+        deadline = time.time() + 12.0
+        while time.time() < deadline:
+            time.sleep(0.6)
+            if _compose_visible():
+                compose_ready = True
+                break
+
+        if not compose_ready:
+            # Page may still be loading — give it a final 3 s grace period
+            time.sleep(3.0)
+
+        # Extra settle time after detection so the fields are fully interactive
+        time.sleep(1.5)
+
+        # ── Step 5: bring the browser window to the foreground ─────────────
+        _focus_browser_window()
+        time.sleep(0.5)
+
+        # ── Step 6: send with Ctrl+Enter ────────────────────────────────────
+        # Fields are already populated by the URL — just send.
+        pyautogui.hotkey("ctrl", "enter")
+        time.sleep(2.5)
+
+        # ── Step 7: confirm compose is gone (= sent successfully) ──────────
+        if _compose_visible():
+            # Still open — one retry
+            pyautogui.hotkey("ctrl", "enter")
+            time.sleep(2.5)
+
+        return "executed" if not _compose_visible() else "sent_unconfirmed"
 
     # ── read_screen ─────────────────────────────────────────────────────
     if action == "read_screen":
