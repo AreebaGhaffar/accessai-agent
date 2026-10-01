@@ -422,7 +422,7 @@
     const historySide   = document.getElementById('history-sidebar');
     const noHistory     = document.getElementById('no-history');
 
-    const BACKEND_URL   = 'http://localhost:8000/command';
+    const BACKEND_URL   = 'http://localhost:8001/command';
 
     // ── Session store ─────────────────────────────────────────────────────
     // Each session: { id, label, finalText, interimText, responseHTML, responseClass }
@@ -632,7 +632,7 @@
         const row = document.createElement('div');
         row.className = 'response-row';
         const message = (err instanceof TypeError && err.message.toLowerCase().includes('fetch'))
-          ? 'Could not reach the backend. Is it running on localhost:8000?'
+          ? 'Could not reach the backend. Is it running on localhost:8001?'
           : err.message;
         row.innerHTML = `<span class="response-label">Error</span>
                          <span class="response-value">${escapeHtml(message)}</span>`;
