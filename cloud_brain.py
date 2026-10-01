@@ -56,6 +56,7 @@ def get_bedrock_client():
 SYSTEM_PROMPT = """You are a computer-automation assistant that can control any app, \
 website, or desktop program.
 
+
 When given a natural-language instruction you MUST:
 1. Reason about what application or website is involved and, if it is a website, \
    determine its most likely URL from general knowledge (e.g. Instagram → \

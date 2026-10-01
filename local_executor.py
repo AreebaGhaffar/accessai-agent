@@ -188,7 +188,7 @@ def execute_step(action: str, target: str) -> str:
         sw, sh = pyautogui.size()
         pyautogui.moveTo(sw // 2, sh // 2, duration=0.15)
         time.sleep(0.2)
-        clicks = -5 if target.lower() in ("down", "scroll down", "") else 5
+        clicks = -600 if target.lower() in ("down", "scroll down", "") else 600
         pyautogui.scroll(clicks)
         return "executed"
 
