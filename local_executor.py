@@ -11,6 +11,8 @@ Run on port 8001 (default).
 Set CLOUD_BRAIN_URL env-var to override where cloud_brain lives.
 """
 
+from pathlib import Path
+from fastapi.responses import FileResponse
 import json
 import os
 import platform
@@ -336,6 +338,12 @@ def execute_step(action: str, target: str) -> str:
 # Endpoint
 # ---------------------------------------------------------------------------
 
+APP_HTML = Path(__file__).parent / "app.html"
+
+
+@app.get("/")
+async def home():
+    return FileResponse(APP_HTML)
 @app.post("/command", response_model=CommandResponse)
 async def handle_command(req: CommandRequest):
     """

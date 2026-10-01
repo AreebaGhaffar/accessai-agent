@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AccessAI Agent</title>
+<style>
+:root{color-scheme:dark;--bg1:#0d0f1a;--bg2:#131628;--surface:rgba(255,255,255,.05);--border:rgba(255,255,255,.11);--text:#e8eaf0;--muted:#9a9eb8;--blue:#4fc3f7;--yellow:#ffd54f;--green:#69f0ae;--red:#ff6b6b;--r:14px}
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;font-family:'Segoe UI',system-ui,sans-serif;background:linear-gradient(135deg,var(--bg1),var(--bg2) 60%,#1a1040);color:var(--text)}
+header{display:flex;justify-content:space-between;align-items:center;padding:16px 28px;border-bottom:1px solid var(--border);background:rgba(13,15,26,.75);position:sticky;top:0;z-index:5}
+.logo{font-weight:700;font-size:1.2rem;display:flex;gap:10px;align-items:center}
+.logo i{width:32px;height:32px;border-radius:50%;background:linear-gradient(135deg,#4fc3f7,#7c4dff);display:grid;place-items:center;font-style:normal;font-size:16px}
+.logo b{color:var(--blue)}
+.pill{font-size:.8rem;color:var(--muted);display:flex;gap:8px;align-items:center}
+.pill s{width:8px;height:8px;border-radius:50%;background:var(--green)}
+main{display:grid;grid-template-columns:1fr 340px;gap:24px;padding:26px 28px;max-width:1150px;margin:0 auto}
+.left{display:flex;flex-direction:column;align-items:center;gap:22px}
+.chips{display:flex;gap:10px;flex-wrap:wrap;justify-content:center}
+.chip{padding:6px 14px;border-radius:20px;font-size:.8rem;font-weight:600;border:1px solid var(--border);color:var(--muted);opacity:.5;transition:.3s}
+.chip.on{opacity:1}
+.chip[data-s=listening].on{color:var(--blue);border-color:var(--blue);background:rgba(79,195,247,.08)}
+.chip[data-s=working].on{color:var(--yellow);border-color:var(--yellow);background:rgba(255,213,79,.08)}
+.chip[data-s=done].on{color:var(--green);border-color:var(--green);background:rgba(105,240,174,.08)}
+.chip[data-s=error].on{color:var(--red);border-color:var(--red);background:rgba(255,107,107,.08)}
+.mic{width:150px;height:150px;border-radius:50%;border:0;cursor:pointer;background:#1e2236;color:var(--muted);display:grid;place-items:center;box-shadow:0 0 0 4px rgba(79,195,247,.1),0 8px 32px rgba(0,0,0,.5);transition:.3s}
+.mic:hover{transform:scale(1.04)}
+.mic.on{background:#1a2a4a;color:var(--blue);animation:rip 1.6s infinite}
+.mic:disabled{opacity:.4;cursor:not-allowed}
+@keyframes rip{0%{box-shadow:0 0 0 0 rgba(79,195,247,.5)}100%{box-shadow:0 0 0 34px rgba(79,195,247,0)}}
+:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+.lbl{color:var(--muted);font-size:.95rem;margin-top:-8px}
+.box{width:100%;max-width:540px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:16px 18px}
+.h{font-size:.8rem;color:var(--muted);margin-bottom:8px}
+textarea{width:100%;min-height:96px;resize:vertical;background:transparent;border:0;color:var(--text);font:inherit;font-size:1.05rem;line-height:1.6}
+#interim{color:var(--muted);min-height:1.4em}
+.row{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;margin-top:10px}
+.b{background:rgba(255,255,255,.07);border:1px solid var(--border);color:var(--text);padding:9px 20px;border-radius:10px;cursor:pointer;font:inherit;font-size:.9rem}
+.b:hover{background:rgba(255,255,255,.13)}
+.go{background:linear-gradient(135deg,#4fc3f7,#7c4dff);border:0;color:#0d0f1a;font-weight:700}
+.go:hover{background:linear-gradient(135deg,#7fd4fa,#9a78ff)}
+.go:disabled{opacity:.5;cursor:wait}
+.auto{font-size:.85rem;color:var(--muted);display:flex;gap:7px;align-items:center}
+#msg{width:100%;max-width:540px;min-height:1.4em;font-size:.9rem;color:var(--yellow);text-align:center}
+.right{display:flex;flex-direction:column;gap:20px}
+.panel{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);overflow:hidden}
+.ph{display:flex;justify-content:space-between;align-items:center;padding:13px 18px;border-bottom:1px solid var(--border);font-size:.9rem;font-weight:600}
+.badge{background:rgba(79,195,247,.14);color:var(--blue);padding:2px 9px;border-radius:10px;font-size:.75rem;font-weight:600}
+.pb{padding:12px 18px;max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+.empty{color:var(--muted);font-size:.85rem;padding:4px 0}
+.step{display:flex;gap:12px;align-items:flex-start}
+.n{flex:none;width:22px;height:22px;border-radius:50%;background:rgba(79,195,247,.14);color:var(--blue);font-size:.72rem;font-weight:700;display:grid;place-items:center;margin-top:1px}
+.sb{flex:1;min-width:0}
+.sa{font-size:.88rem;font-weight:600}
+.sd{font-size:.78rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tag{flex:none;font-size:.72rem;font-weight:600;padding:2px 8px;border-radius:8px;margin-top:2px}
+.tag.ok{background:rgba(105,240,174,.13);color:var(--green)}
+.tag.warn{background:rgba(255,213,79,.13);color:var(--yellow)}
+.tag.err{background:rgba(255,107,107,.13);color:var(--red)}
+.hr{display:flex;justify-content:space-between;gap:10px;align-items:center;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--border);color:var(--text);font:inherit;font-size:.88rem;padding:9px 0;cursor:pointer}
+.hr:last-child{border-bottom:0}
+.hr:hover .ht{color:var(--blue)}
+.ht{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+footer{text-align:center;padding:18px;color:var(--muted);font-size:.85rem;border-top:1px solid var(--border)}
+@media(max-width:860px){main{grid-template-columns:1fr;padding:18px 14px}header{padding:14px}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"><i aria-hidden="true">♿</i>Access<b>AI</b> Agent</div>
+  <div class="pill"><s aria-hidden="true"></s>Claude on Amazon Bedrock</div>
+</header>
+
+<main>
+  <section class="left" aria-label="Voice control">
+    <div class="chips" aria-hidden="true">
+      <span class="chip" data-s="listening">Listening</span>
+      <span class="chip" data-s="working">Working</span>
+      <span class="chip" data-s="done">Done</span>
+      <span class="chip" data-s="error">Error</span>
+    </div>
+
+    <button class="mic" id="mic" type="button" aria-pressed="false" aria-label="Start or stop listening">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 11z"/></svg>
+    </button>
+    <p class="lbl" id="ml">Click to speak</p>
+
+    <div class="box">
+      <div class="h">Your command (edit before sending)</div>
+      <textarea id="tx" placeholder="Click the mic and speak, or type a command here…" aria-label="Command text"></textarea>
+      <div id="interim" aria-hidden="true"></div>
+      <div class="row">
+        <label class="auto"><input type="checkbox" id="auto"> Send automatically when I stop</label>
+        <span>
+          <button class="b" id="clear" type="button">Clear</button>
+          <button class="b go" id="send" type="button">Send</button>
+        </span>
+      </div>
+    </div>
+    <p id="msg" role="status" aria-live="polite"></p>
+  </section>
+
+  <aside class="right">
+    <div class="panel">
+      <div class="ph">What the agent did <span class="badge" id="sb">Idle</span></div>
+      <div class="pb" id="steps"><p class="empty">Steps appear here after you send a command.</p></div>
+    </div>
+    <div class="panel">
+      <div class="ph">Command history <span class="badge" id="hb">0 runs</span></div>
+      <div class="pb" id="hist"></div>
+    </div>
+  </aside>
+</main>
+
+<footer>One voice. Full control. For everyone.</footer>
+
+<script>
+const $ = id => document.getElementById(id);
+const BACKEND = location.protocol.startsWith('http') ? '/command' : 'http://localhost:8001/command';
+const mic = $('mic'), tx = $('tx');
+let want = false, bad = false, busy = false, base = '', fin = '';
+
+function setState(s){ document.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c.dataset.s === s)); }
+function msg(t){ $('msg').textContent = t || ''; }
+try { $('auto').checked = localStorage.getItem('aa_auto') === '1'; } catch {}
+$('auto').onchange = () => { try { localStorage.setItem('aa_auto', $('auto').checked ? '1' : '0'); } catch {} };
+
+/* ── Steps panel (real backend response) ── */
+function renderSteps(list){
+  const el = $('steps'); el.textContent = '';
+  list.forEach((s, i) => {
+    const d = document.createElement('div'); d.className = 'step';
+    d.innerHTML = '<span class="n"></span><div class="sb"><div class="sa"></div><div class="sd"></div></div><span class="tag"></span>';
+    d.querySelector('.n').textContent = i + 1;
+    d.querySelector('.sa').textContent = s.action;
+    d.querySelector('.sd').textContent = s.target;
+    const t = d.querySelector('.tag');
+    t.textContent = s.status;
+    t.classList.add(s.status === 'executed' ? 'ok' : (s.status === 'not_implemented' ? 'warn' : 'err'));
+    el.appendChild(d);
+  });
+}
+
+/* ── History (kept in this browser) ── */
+let hist = [];
+try { hist = JSON.parse(localStorage.getItem('aa_hist') || '[]'); } catch {}
+function addHist(text, st){
+  hist.unshift({ text, st }); hist = hist.slice(0, 30);
+  try { localStorage.setItem('aa_hist', JSON.stringify(hist)); } catch {}
+  renderHist();
+}
+function renderHist(){
+  const el = $('hist'); el.textContent = '';
+  $('hb').textContent = hist.length + (hist.length === 1 ? ' run' : ' runs');
+  if (!hist.length){ el.innerHTML = '<p class="empty">No commands yet.</p>'; return; }
+  hist.forEach(h => {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'hr'; b.title = 'Load into the editor';
+    const t = document.createElement('span'); t.className = 'ht'; t.textContent = h.text;
+    const g = document.createElement('span'); g.className = 'tag ' + h.st; g.textContent = { ok:'Done', warn:'Check', err:'Failed' }[h.st];
+    b.append(t, g);
+    b.onclick = () => { tx.value = h.text; tx.focus(); };
+    el.appendChild(b);
+  });
+}
+renderHist();
+
+/* ── Send to the local executor ── */
+async function send(){
+  const text = tx.value.trim();
+  if (!text || busy) return;
+  busy = true; $('send').disabled = true; msg('');
+  setState('working'); $('sb').textContent = 'Running';
+  try {
+    const r = await fetch(BACKEND, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text }) });
+    if (!r.ok){ let d = ''; try { d = (await r.json()).detail; } catch {} throw new Error(d || r.status + ' ' + r.statusText); }
+    const data = await r.json();
+    renderSteps(data.steps);
+    const ok = data.overall_status === 'executed';
+    addHist(text, ok ? 'ok' : 'warn');
+    setState(ok ? 'done' : 'error'); $('sb').textContent = ok ? 'Done' : 'Needs a check';
+    if (!ok) msg('Some steps did not finish. Check the status next to each step.');
+  } catch (e) {
+    setState('error'); $('sb').textContent = 'Failed'; addHist(text, 'err');
+    msg(e instanceof TypeError ? 'Cannot reach the local executor. Start it on port 8001.' : e.message);
+  } finally { busy = false; $('send').disabled = false; }
+}
+$('send').onclick = send;
+tx.addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); send(); } });
+$('clear').onclick = () => { tx.value = ''; base = ''; fin = ''; $('interim').textContent = ''; msg(''); setState(null); $('sb').textContent = 'Idle'; $('steps').innerHTML = '<p class="empty">Steps appear here after you send a command.</p>'; tx.focus(); };
+
+/* ── Speech: click to start, click to stop, no cut-offs on pauses ── */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+if (!SR){
+  mic.disabled = true;
+  msg('This browser has no speech recognition. Use Edge or Chrome, or type your command.');
+} else {
+  const rec = new SR();
+  rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+  const start = () => { try { rec.start(); } catch {} };
+
+  mic.onclick = () => {
+    if (!want){
+      want = true; bad = false; msg('');
+      base = tx.value.trim() ? tx.value.trim() + ' ' : ''; fin = '';
+      mic.classList.add('on'); mic.setAttribute('aria-pressed', 'true');
+      $('ml').textContent = 'Listening… click to stop';
+      setState('listening'); start();
+    } else { want = false; rec.stop(); }
+  };
+
+  rec.onend = () => {
+    if (want){ start(); return; }              // Chrome's silence timeout: restart quietly
+    mic.classList.remove('on'); mic.setAttribute('aria-pressed', 'false');
+    $('interim').textContent = ''; $('ml').textContent = 'Click to speak';
+    if (bad) return;
+    if (tx.value.trim() && $('auto').checked) send();
+    else { setState(null); if (tx.value.trim()) msg('Fix any misheard words, then press Send.'); }
+  };
+
+  rec.onerror = e => {
+    if (e.error === 'no-speech' || e.error === 'aborted') return;
+    bad = true; want = false; setState('error');
+    msg(e.error === 'not-allowed' ? 'Microphone is blocked. Allow it in the address bar, then try again.' : 'Speech error: ' + e.error);
+  };
+
+  rec.onresult = e => {
+    let interim = '';
+    for (let i = e.resultIndex; i < e.results.length; i++){
+      const t = e.results[i][0].transcript;
+      if (e.results[i].isFinal) fin += t + ' '; else interim += t;
+    }
+    tx.value = base + fin;
+    $('interim').textContent = interim;
+  };
+}
+</script>
+</body>
+</html>
