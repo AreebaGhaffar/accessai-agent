@@ -56,6 +56,7 @@ def get_bedrock_client():
 SYSTEM_PROMPT = """You are a computer-automation assistant that can control any app, \
 website, or desktop program.
 
+
 When given a natural-language instruction you MUST:
 1. Reason about what application or website is involved and, if it is a website, \
    determine its most likely URL from general knowledge (e.g. Instagram → \
@@ -66,7 +67,7 @@ When given a natural-language instruction you MUST:
 3. Return ONLY a JSON object with a single key "steps" whose value is an array. \
    Each element is an object with exactly two string fields:
      "action" — one of: open_browser | click | type_text | scroll | \
-                         key_press | wait | read_screen | compose_email
+                         key_press | wait | read_screen | compose_email | whatsapp_message
      "target" — what to act on (a URL, button label, text to type, key name, \
                   scroll direction, wait duration in ms, or a JSON string for compose_email)
 
@@ -92,7 +93,21 @@ Example for "open Instagram and scroll down":
 {"steps":[{"action":"open_browser","target":"https://www.instagram.com"},{"action":"wait","target":"2000"},{"action":"scroll","target":"down"}]}
 
 Example for "open gmail and send mail to bob@example.com saying hello":
-{"steps":[{"action":"compose_email","target":"{\\"to\\":\\"bob@example.com\\",\\"subject\\":\\"hello\\",\\"body\\":\\"hello\\"}"}]}"""
+{"steps":[{"action":"compose_email","target":"{\\"to\\":\\"bob@example.com\\",\\"subject\\":\\"hello\\",\\"body\\":\\"hello\\"}"}]}
+
+SPECIAL RULE — sending a WhatsApp message:
+When the task involves sending a WhatsApp message, you MUST use ONLY the \
+whatsapp_message action — do NOT add open_browser or wait steps before it. \
+The whatsapp_message action opens WhatsApp Web internally and waits for it \
+to be ready. \
+The target must be a JSON string with keys: \
+"contact" (the name exactly as the user said it) and "message" (the message text).
+Example: {"action":"whatsapp_message","target":"{\\"contact\\":\\"maryam\\",\\"message\\":\\"hi\\"}"}
+The full step list for a WhatsApp send task is just ONE step:
+  1. whatsapp_message → JSON string with contact/message
+
+Example for "send message to maryam saying hi":
+{"steps":[{"action":"whatsapp_message","target":"{\\"contact\\":\\"maryam\\",\\"message\\":\\"hi\\"}"}]}"""
 
 
 # ---------------------------------------------------------------------------

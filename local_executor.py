@@ -42,7 +42,7 @@ app.add_middleware(
 )
 
 # Where to reach the cloud_brain /plan endpoint
-CLOUD_BRAIN_URL = os.environ.get("CLOUD_BRAIN_URL", "http://localhost:8002")
+CLOUD_BRAIN_URL = os.environ.get("CLOUD_BRAIN_URL", "http://accessai-brain.us-east-1.elasticbeanstalk.com")
 
 # ---------------------------------------------------------------------------
 # Request / response models
@@ -93,7 +93,7 @@ def _focus_browser_window() -> None:
                 "powershell", "-NoProfile", "-Command",
                 "$wsh = New-Object -ComObject WScript.Shell; "
                 "$proc = Get-Process | Where-Object { $_.MainWindowTitle -match "
-                "'Chrome|Firefox|Edge|Instagram|Gmail|Opera|Brave' } | "
+                "'Chrome|Firefox|Edge|Instagram|Gmail|Opera|Brave|WhatsApp' } | "
                 "Sort-Object CPU -Descending | Select-Object -First 1; "
                 "if ($proc) { $wsh.AppActivate($proc.Id) }",
             ],
@@ -160,6 +160,7 @@ def click_element_by_name(name: str) -> bool:
         return "clicked" in result.stdout
     except Exception:
         return False
+
 
 
 # ---------------------------------------------------------------------------
@@ -327,6 +328,60 @@ def execute_step(action: str, target: str) -> str:
         if _send_button_exists():
             return "sent_unconfirmed"
         return "executed"
+    # ── whatsapp_message ────────────────────────────────────────────────
+    if action == "whatsapp_message":
+        try:
+            params = json.loads(target) if isinstance(target, str) else target
+        except (json.JSONDecodeError, TypeError):
+            return "invalid_whatsapp_params"
+
+        import pyperclip
+
+        contact = str(params.get("contact", "")).strip()
+        message = str(params.get("message", "")).strip()
+
+        if not contact or not message:
+            return "invalid_whatsapp_params"
+
+        # Open WhatsApp Web
+        webbrowser.open("https://web.whatsapp.com")
+
+        # Give WhatsApp a moment to load before we start polling
+        time.sleep(3)
+        _focus_browser_window()
+
+        # Poll for the exact search Edit control (only exists after WhatsApp loads).
+        # Never use a "contains" match — it hits the Windows taskbar or Edge's address bar.
+        SEARCH_NAME = "Search or start a new chat"
+        search_ready = False
+        deadline = time.time() + 40.0
+        while time.time() < deadline:
+            if click_element_by_name(SEARCH_NAME):
+                search_ready = True
+                break
+            time.sleep(1.0)
+
+        if not search_ready:
+            return "whatsapp_not_ready"
+
+        # Clear any stale text, then paste the contact name
+        time.sleep(1.0)
+        pyautogui.hotkey("ctrl", "a")
+        pyperclip.copy(contact)
+        pyautogui.hotkey("ctrl", "v")
+        time.sleep(1.5)
+
+        # Open the chat
+        pyautogui.press("enter")
+        time.sleep(1.0)
+
+        # Paste the message and send
+        pyperclip.copy(message)
+        pyautogui.hotkey("ctrl", "v")
+        pyautogui.press("enter")
+
+        return "executed"
+
     # ── read_screen ─────────────────────────────────────────────────────
     if action == "read_screen":
         return "not_implemented"
