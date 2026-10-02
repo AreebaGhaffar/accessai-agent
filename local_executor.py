@@ -69,10 +69,16 @@ class CommandResponse(BaseModel):
 
 async def get_plan(user_text: str) -> list[dict]:
     """Call cloud_brain's /plan and return the list of action dicts."""
+    headers = {}
+    api_key = os.environ.get("BRAIN_API_KEY", "")
+    if api_key:
+        headers["X-API-Key"] = api_key
+
     async with httpx.AsyncClient(timeout=60.0) as client:
         resp = await client.post(
             f"{CLOUD_BRAIN_URL}/plan",
             json={"text": user_text},
+            headers=headers,
         )
         resp.raise_for_status()
         return resp.json()["steps"]

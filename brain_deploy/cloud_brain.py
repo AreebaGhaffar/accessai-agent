@@ -8,14 +8,22 @@ No execution happens here — no pyautogui, no webbrowser, no clicking.
 Run on port 8000 (default).
 """
 
+import hmac
+import os
 import subprocess
 import json
 import datetime as _dt
 
 import boto3
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
+# ---------------------------------------------------------------------------
+# API-key guard (set BRAIN_API_KEY in the environment to enable)
+# ---------------------------------------------------------------------------
+
+BRAIN_API_KEY = os.environ.get("BRAIN_API_KEY", "")
 
 # ---------------------------------------------------------------------------
 # App setup
@@ -164,11 +172,17 @@ class PlanResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 @app.post("/plan", response_model=PlanResponse)
-async def plan(req: PlanRequest):
+async def plan(req: PlanRequest, request: Request):
     """
     Accept a natural-language command, ask Claude to produce an ordered list
     of action steps, and return them as JSON — no execution occurs here.
     """
+    # API-key check — skipped when BRAIN_API_KEY is not configured
+    if BRAIN_API_KEY:
+        incoming_key = request.headers.get("X-API-Key", "")
+        if not hmac.compare_digest(incoming_key, BRAIN_API_KEY):
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
     if not req.text.strip():
         raise HTTPException(status_code=400, detail="'text' must not be empty.")
 
