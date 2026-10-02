@@ -81,14 +81,24 @@ footer{text-align:center;padding:18px;color:var(--muted);font-size:.85rem;border
       <span class="chip" data-s="error">Error</span>
     </div>
 
-    <button class="mic" id="mic" type="button" aria-pressed="false" aria-label="Start or stop listening">
-      <svg width="56" height="56" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 11z"/></svg>
-    </button>
+    <div style="display:flex;flex-direction:column;align-items:center;gap:10px">
+      <button class="mic" id="mic" type="button" aria-pressed="false" aria-label="Start or stop listening">
+        <svg width="56" height="56" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3z"/><path d="M19 11a1 1 0 0 0-2 0 5 5 0 0 1-10 0 1 1 0 0 0-2 0 7 7 0 0 0 6 6.92V20H9a1 1 0 0 0 0 2h6a1 1 0 0 0 0-2h-2v-2.08A7 7 0 0 0 19 11z"/></svg>
+      </button>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label for="lang-select" style="font-size:.8rem;color:var(--muted)">Language</label>
+        <select id="lang-select" style="background:var(--surface);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:5px 10px;font:inherit;font-size:.82rem;cursor:pointer" aria-label="Speech recognition language">
+          <option value="en-PK">English (Pakistan)</option>
+          <option value="en-US">English (US)</option>
+          <option value="ur-PK">اردو (Urdu)</option>
+        </select>
+      </div>
+    </div>
     <p class="lbl" id="ml">Click to speak</p>
 
     <div class="box">
       <div class="h">Your command (edit before sending)</div>
-      <textarea id="tx" placeholder="Click the mic and speak, or type a command here…" aria-label="Command text"></textarea>
+      <textarea id="tx" placeholder="Click the mic and speak, or type a command here…" aria-label="Command text" dir="auto"></textarea>
       <div id="interim" aria-hidden="true"></div>
       <div class="row">
         <label class="auto"><input type="checkbox" id="auto"> Send automatically when I stop</label>
@@ -196,7 +206,22 @@ if (!SR){
   msg('This browser has no speech recognition. Use Edge or Chrome, or type your command.');
 } else {
   const rec = new SR();
-  rec.continuous = true; rec.interimResults = true; rec.lang = 'en-US';
+  rec.continuous = true; rec.interimResults = true;
+
+  // Restore saved language, defaulting to en-PK
+  const langSel = $('lang-select');
+  const savedLang = (() => { try { return localStorage.getItem('aa_lang') || 'en-PK'; } catch { return 'en-PK'; } })();
+  langSel.value = savedLang;
+  rec.lang = savedLang;
+
+  langSel.onchange = () => {
+    const chosen = langSel.value;
+    try { localStorage.setItem('aa_lang', chosen); } catch {}
+    rec.lang = chosen;
+    // Restart recognition if currently listening so the new lang takes effect
+    if (want) { rec.stop(); /* onend will restart because want===true */ }
+  };
+
   const start = () => { try { rec.start(); } catch {} };
 
   mic.onclick = () => {

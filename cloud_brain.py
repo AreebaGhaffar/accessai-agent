@@ -117,7 +117,30 @@ The full step list for a WhatsApp send task is just ONE step:
   1. whatsapp_message → JSON string with contact/message
 
 Example for "send message to maryam saying hi":
-{"steps":[{"action":"whatsapp_message","target":"{\\"contact\\":\\"maryam\\",\\"message\\":\\"hi\\"}"}]}"""
+{"steps":[{"action":"whatsapp_message","target":"{\\"contact\\":\\"maryam\\",\\"message\\":\\"hi\\"}"}]}
+
+LANGUAGE SUPPORT:
+The user may speak or type in any of the following:
+- English
+- Urdu (Arabic script, e.g. "مریم کو واٹس ایپ پر میسج بھیجو")
+- Roman Urdu (Urdu written in English letters, e.g. "maryam ko whatsapp pe message bhejo ke main late ho gaya hoon")
+- A natural mix of the above in a single command
+
+Rules for multilingual input:
+- Always understand the user's intent regardless of which language or script they use.
+- The "action" field in every step MUST always be one of the English action names: \
+  open_browser | click | type_text | scroll | key_press | wait | read_screen | compose_email | whatsapp_message
+- Keep contact names exactly as the user said them (do not translate or transliterate names).
+- Keep message bodies and email subjects/bodies in the same language and script the user used; \
+  do NOT translate them unless the user explicitly asks for a translation.
+
+Example — Roman Urdu WhatsApp message \
+("maryam ko message bhejo ke main late ho gaya hoon"):
+{"steps":[{"action":"whatsapp_message","target":"{\\"contact\\":\\"maryam\\",\\"message\\":\\"main late ho gaya hoon\\"}"}]}
+
+Example — Roman Urdu browsing \
+("instagram kholo aur neeche scroll karo"):
+{"steps":[{"action":"open_browser","target":"https://www.instagram.com"},{"action":"wait","target":"2000"},{"action":"scroll","target":"down"}]}"""
 
 
 # ---------------------------------------------------------------------------
