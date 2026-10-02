@@ -340,6 +340,52 @@
       letter-spacing: 0.04em;
     }
 
+    /* ─── WHY THIS MATTERS ───────────────────────────────────── */
+    #why-this-matters {
+      padding: 100px 0;
+      background: linear-gradient(180deg, transparent 0%, rgba(179,157,219,0.03) 50%, transparent 100%);
+    }
+
+    .why-this-matters-inner {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    .why-this-matters-inner p {
+      font-size: 1.05rem;
+      color: var(--muted);
+      line-height: 1.75;
+      margin-bottom: 20px;
+    }
+
+    .why-this-matters-inner p:last-of-type {
+      margin-bottom: 32px;
+    }
+
+    .why-sources {
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+      margin-top: 8px;
+    }
+
+    .why-sources p {
+      font-size: 0.78rem !important;
+      color: var(--muted);
+      margin-bottom: 6px !important;
+      letter-spacing: 0.03em;
+    }
+
+    .why-sources a {
+      color: var(--blue);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .why-sources a:hover {
+      color: var(--white);
+      text-decoration: underline;
+    }
+
     /* ─── HOW IT WORKS ────────────────────────────────────────── */
     #how-it-works {
       padding: 100px 0;
@@ -895,6 +941,32 @@
             <div class="hero-stat-num">&lt;1s</div>
             <div class="hero-stat-label">Voice-to-action latency</div>
           </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ══ WHY THIS MATTERS ════════════════════════════════════════════ -->
+  <section id="why-this-matters" aria-labelledby="why-this-matters-title">
+    <div class="container">
+      <div class="why-this-matters-inner">
+
+        <div class="section-center reveal" style="text-align: left; align-items: flex-start; margin-bottom: 40px;">
+          <p class="section-label">Context</p>
+          <h2 class="section-title" id="why-this-matters-title">Why this matters</h2>
+        </div>
+
+        <p class="reveal">The World Health Organization estimates that more than 1 billion people need at least one assistive product, but only 1 in 10 has access, because of high prices, lack of awareness and a shortage of trained staff.</p>
+
+        <p class="reveal reveal-delay-1">WHO describes assistive technology as a part of health technology that helps people live healthy, independent and dignified lives, and says it can reduce the need for long-term care and the work of caregivers.</p>
+
+        <p class="reveal reveal-delay-2">AccessAI is assistive software that runs on an ordinary laptop with pay-per-use cloud. No special hardware, so more people can reach it.</p>
+
+        <div class="why-sources reveal reveal-delay-3">
+          <p>Sources:</p>
+          <p>— <a href="https://www.who.int/news/item/23-08-2019-who-convenes-global-stakeholders-to-improve-access-to-assistive-technology" target="_blank" rel="noopener">WHO, "WHO convenes global stakeholders to improve access to assistive technology" (2019)</a></p>
+          <p>— <a href="https://www.paho.org/en/news/7-10-2021-global-report-effective-access-assistive-technology-consultation" target="_blank" rel="noopener">PAHO, "Global Report on Effective Access to Assistive Technology Consultation" (2021)</a></p>
         </div>
 
       </div>
