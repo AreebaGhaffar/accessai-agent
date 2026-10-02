@@ -1,81 +1,86 @@
-# 🎙️ AccessAI Agent
+# AccessAI Agent
 
 **One voice. Full control. For everyone.**
 
-AccessAI Agent is a voice-controlled AI assistant that lets people with motor disabilities — and anyone who wants hands-free computer use — operate their entire laptop using natural language. Speak a command, and an AI agent understands your intent, plans the steps, and executes them for you: opening apps, browsing the web, typing messages, and more.
+AccessAI Agent lets people with motor disabilities, and anyone who wants to work hands-free, run their laptop by speaking. You say what you want, Claude on Amazon Bedrock plans the steps, and your laptop carries them out: opening sites, scrolling, sending email, messaging on WhatsApp.
 
-> 🔗 **Live Demo:** [Add your Elastic Beanstalk URL here once deployed]
-> 🎥 **Demo Video:** [Add your video link here]
+**Live URL:** http://accessai-brain.us-east-1.elasticbeanstalk.com
+(The page shows the product. The planning endpoint behind it is protected by a secret key so it cannot be used by strangers. Health check: `/health`.)
 
----
+Built for the AWS Zero to Shipped hackathon. Category: Social Good (Health). Team: Mind Flayer.
 
-## 💡 Problem
+## Why this exists
 
-Over 1 billion people worldwide live with disabilities affecting their ability to use a standard mouse and keyboard. Most assistive tools are rigid, expensive, and only respond to fixed commands — they can't understand what a person actually *means*.
+Most voice tools handle one command at a time, like "open Gmail". People who cannot use a mouse or keyboard need whole tasks done: "send Maryam a WhatsApp message saying I'm running late". AccessAI turns a spoken sentence into a complete multi-step task, and lets you correct a misheard word before anything runs.
 
-## ✅ Solution
+## How it works
 
-AccessAI Agent uses **Amazon Bedrock (Claude Haiku 4.5)** to understand natural spoken commands like *"open Gmail and send an email saying hi"* — reasoning out the correct sequence of steps dynamically, for **any** app or website, not just a hardcoded list. It then executes those steps directly on the computer using keyboard/mouse automation.
+![Architecture](docs/architecture.svg)
 
-## 🏗️ Architecture
-Voice Input (Web Speech API)
-↓
-Frontend (HTML/JS) — click-to-record, live transcript, session history
-↓ HTTP POST
-FastAPI Backend
-↓
-Amazon Bedrock (Claude Haiku 4.5, cross-region inference profile)
-↓ returns structured multi-step JSON plan
-Action Executor (PyAutoGUI, clipboard automation, browser control)
-↓
-Real actions on the user's computer
+- **Voice page (`app.html`)**: click the mic, speak, click again to stop. The text stays editable so a misheard name never reaches your apps. Served from the local executor at `http://localhost:8001/`.
+- **Local executor (`local_executor.py`)**: runs on the user's own laptop, because only the laptop can move its own mouse and keyboard. It asks the cloud brain for a plan, then runs each step (browser, keyboard, Windows UI Automation).
+- **Cloud brain (`cloud_brain.py`)**: runs on AWS Elastic Beanstalk. It calls Claude Haiku 4.5 on Amazon Bedrock and returns only a JSON list of steps. It never touches a screen.
 
-## 🛠️ Tech Stack
+Splitting thinking (cloud) from acting (laptop) keeps the AI on AWS while your computer stays in your control.
 
-| Layer | Technology |
-|---|---|
-| Voice Input | Web Speech API |
-| Frontend | HTML / CSS / JavaScript |
-| Backend | FastAPI (Python) |
-| AI Model | Amazon Bedrock — Claude Haiku 4.5 |
-| Action Execution | PyAutoGUI, clipboard automation |
-| Coding Agent | Kiro, connected to AWS via Agent Toolkit |
-| Deployment | AWS Elastic Beanstalk |
+## What works today
 
-## 🎯 Example Commands
+- Open any website by name and scroll it.
+- Send a Gmail message by voice, with the Send button clicked and checked.
+- Send a WhatsApp Web message by contact name. Partial names work ("Maryam" finds "Maryam Januu") because WhatsApp's own search does the matching.
+- Dark interface, designed to be easy on the eyes.
 
-- "Open Gmail and send an email to alice@example.com saying hi"
-- "Open Instagram and scroll down"
-- "Open my browser and go to Netflix"
-- "Scroll down slowly"
+Windows only for now.
 
-## 🚀 How to Run Locally
+## AWS services used
 
-```bash
-git clone https://github.com/AreebaGhaffar/accessai-agent.git
+- **Amazon Bedrock**: Claude Haiku 4.5 plans each task.
+- **AWS Elastic Beanstalk**: hosts the cloud brain at the live URL.
+- **AWS IAM**: the server uses an instance role with Bedrock access, so no keys are stored on it.
+- **Kiro with the Agent Toolkit for AWS**: used to build and ship the project.
+
+## Run it yourself
+
+You need Windows, Python 3.11 or newer, Edge or Chrome, and an AWS account with Bedrock access to Claude Haiku 4.5 in us-east-1 (set up with `aws configure`).
+
+```powershell
+git clone https://github.com/AreebaGhaffar/accessai-agent
 cd accessai-agent
 python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-.\run_backend.ps1
+.venv\Scripts\pip install fastapi uvicorn boto3 httpx pyautogui pyperclip pillow pydantic
 ```
-Then open `voice_test.html` in your browser.
 
-## ☁️ AWS Deployment
+Terminal 1, the brain:
 
-The backend is deployed on **AWS Elastic Beanstalk**, calling **Amazon Bedrock** for AI reasoning. [Add a sentence here once deployed about your specific setup.]
+```powershell
+.venv\Scripts\python.exe -m uvicorn cloud_brain:app --port 8000
+```
 
-## 🗺️ Future Roadmap
+Terminal 2, the executor:
 
-- Text-to-speech feedback for fully screen-free operation
-- Broader desktop app support beyond browser-based tasks
-- Persistent session history across restarts
-- Expanded accessibility testing with real users with motor disabilities
+```powershell
+$env:CLOUD_BRAIN_URL="http://localhost:8000"
+.venv\Scripts\python.exe -m uvicorn local_executor:app --port 8001
+```
 
-## 🏆 Hackathon
+Open `http://localhost:8001/`, click the mic and speak. For WhatsApp, be signed in to WhatsApp Web in your browser first.
 
-Built for **AWS Zero to Shipped** — Category: Social Good (Health) — Lane: [Startup/Community]
+To point the executor at a deployed brain that uses an API key, also set `$env:BRAIN_API_KEY` to the same value as the server's `BRAIN_API_KEY` setting.
 
-## 👤 Team
+## Safety and limits
 
-Areeba Ghaffar — Team Mind Flayer
+- The cloud endpoint requires a secret key. No key is stored in this repository.
+- Today the agent runs the plan as soon as you press Send. Confirmation before risky actions (send, delete, pay) is the next safety feature.
+- Speech recognition uses the browser's built-in service, which can mishear names. That is why the text is editable before sending.
+
+## Roadmap
+
+1. See-and-act loop: the laptop shares a screenshot, Claude picks the next single action, and it repeats until the task is done, so it works on apps we never wrote code for.
+2. Pause one task, start another, resume the first.
+3. Wake word and spoken replies for a fully hands-free feel.
+4. Amazon Transcribe for more accurate speech recognition across accents.
+5. Confirmation prompts before risky actions.
+
+## Team
+
+Mind Flayer. Builder: Areeba Ghaffar.
