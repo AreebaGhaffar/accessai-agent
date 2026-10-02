@@ -13,10 +13,12 @@ import os
 import subprocess
 import json
 import datetime as _dt
+from pathlib import Path
 
 import boto3
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 # ---------------------------------------------------------------------------
@@ -165,6 +167,23 @@ class PlanRequest(BaseModel):
 
 class PlanResponse(BaseModel):
     steps: list[dict]
+
+
+# ---------------------------------------------------------------------------
+# Public routes
+# ---------------------------------------------------------------------------
+
+@app.get("/")
+async def root():
+    """Serve the landing page — no API key required."""
+    index = Path(__file__).parent / "index.html"
+    return FileResponse(str(index), media_type="text/html")
+
+
+@app.get("/health")
+async def health():
+    """Health check — no API key required."""
+    return {"status": "ok", "service": "accessai-brain"}
 
 
 # ---------------------------------------------------------------------------
