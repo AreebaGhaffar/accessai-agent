@@ -1,0 +1,12 @@
+   {
+     "manifest_version": 3,
+     "name": "AccessAI WhatsApp Hands",
+     "version": "0.1",
+     "description": "Voice-controlled WhatsApp actions for AccessAI Agent",
+     "content_scripts": [
+       {
+         "matches": ["https://web.whatsapp.com/*"],
+         "js": ["content.js"]
+       }
+     ]
+   }
