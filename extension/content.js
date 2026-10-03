@@ -22,37 +22,94 @@ function readMessages(n) {
 }
 
 // ── sendMessage(text) ────────────────────────────────────────────────────────
-// Focuses the compose box, inserts text, waits 500 ms, then clicks Send.
+// Waits for the chat panel (#main + header matching contactName), then finds
+// the compose box, inserts text, and sends.
+// contactName is optional; when supplied the header check is skipped if absent.
 // Returns a Promise that resolves to 'sent' or an error string.
-function sendMessage(text) {
-  return new Promise(resolve => {
-    const composeBox = document.querySelector('footer div[contenteditable="true"]');
-    if (!composeBox) {
-      resolve('compose box not found');
-      return;
-    }
+async function sendMessage(text, contactName) {
+  // ── 1. Wait up to 5 s for #main to appear with the right chat open ────────
+  const firstWord = contactName
+    ? contactName.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+                 .split(/\s+/)[0].toLowerCase().trim()
+    : null;
 
-    composeBox.focus();
-    const inserted = document.execCommand('insertText', false, text);
-    if (!inserted) {
-      composeBox.textContent = text;
-      composeBox.dispatchEvent(new Event('input', { bubbles: true }));
+  let chatReady = false;
+  const chatDeadline = Date.now() + 5000;
+  while (Date.now() < chatDeadline) {
+    const main = document.querySelector('#main');
+    if (main) {
+      if (!firstWord) { chatReady = true; break; }
+      // Check that the chat header contains the first word of the contact name
+      const headerEl =
+        main.querySelector('header [data-testid="conversation-info-header-chat-title"]') ||
+        main.querySelector('header span[title]') ||
+        main.querySelector('header span[dir="auto"]');
+      const headerText = headerEl
+        ? (headerEl.title || headerEl.textContent || '').toLowerCase()
+            .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+        : '';
+      if (headerText.includes(firstWord)) { chatReady = true; break; }
     }
+    await new Promise(r => setTimeout(r, 200));
+  }
 
-    setTimeout(() => {
-      let sendBtn = document.querySelector('button[aria-label="Send"]');
-      if (!sendBtn) {
-        const sendIcon = document.querySelector('span[data-icon="send"]');
-        if (sendIcon) sendBtn = sendIcon.closest('button');
-      }
-      if (!sendBtn) {
-        resolve('send button not found');
-        return;
-      }
-      sendBtn.click();
-      resolve('sent');
-    }, 500);
-  });
+  if (!chatReady) {
+    console.log('[AccessAI]: chat panel not found');
+    return 'chat panel not found';
+  }
+  console.log('[AccessAI]: chat panel found');
+
+  // ── 2. Find compose box inside #main, trying selectors in priority order ──
+  const COMPOSE_SELECTORS = [
+    '#main footer div[contenteditable="true"][data-tab="10"]',
+    '#main footer div[contenteditable="true"]',
+    '#main div[contenteditable="true"][aria-label*="message" i]',
+    '#main div[contenteditable="true"][role="textbox"]',
+  ];
+
+  let composeBox = null;
+  let matchedSelector = null;
+  const composeDeadline = Date.now() + 3000;
+  while (Date.now() < composeDeadline) {
+    for (const sel of COMPOSE_SELECTORS) {
+      const el = document.querySelector(sel);
+      if (el) { composeBox = el; matchedSelector = sel; break; }
+    }
+    if (composeBox) break;
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  if (!composeBox) {
+    // Log diagnostic info
+    const allEditable = [...document.querySelectorAll('[contenteditable="true"]')].slice(0, 5);
+    console.log('[AccessAI]: compose box not found. First 5 contenteditable elements:');
+    allEditable.forEach((el, i) => {
+      console.log(`  [${i}] aria-label="${el.getAttribute('aria-label')}" data-tab="${el.getAttribute('data-tab')}" tag=${el.tagName} id=${el.id}`);
+    });
+    return 'compose box not found';
+  }
+  console.log(`[AccessAI]: compose box found via selector: ${matchedSelector}`);
+
+  // ── 3. Insert text and send ───────────────────────────────────────────────
+  composeBox.focus();
+  const inserted = document.execCommand('insertText', false, text);
+  if (!inserted) {
+    composeBox.textContent = text;
+    composeBox.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // Try pressing Enter via keyboard events
+  const enterOpts = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13, bubbles: true };
+  composeBox.dispatchEvent(new KeyboardEvent('keydown',  enterOpts));
+  composeBox.dispatchEvent(new KeyboardEvent('keypress', enterOpts));
+  composeBox.dispatchEvent(new KeyboardEvent('keyup',    enterOpts));
+
+  // Also click the Send button if it exists
+  const sendBtn = document.querySelector('button[aria-label="Send"]');
+  if (sendBtn) sendBtn.click();
+
+  console.log('[AccessAI] message sent');
+  return 'sent';
 }
 
 // ── WhatsApp UI helpers ───────────────────────────────────────────────────────
@@ -253,6 +310,23 @@ function normalizeText(text) {
     .trim();
 }
 
+/**
+ * speakableName(name) — return a TTS-safe version of a contact name.
+ * Removes emoji and non-letter/number/space characters, collapses repeated
+ * spaces, and trims.  Used ONLY in spoken sentences; the original name is
+ * always used for matching and clicking.
+ */
+function speakableName(name) {
+  return name
+    // strip emoji (Unicode emoji and misc-symbol blocks)
+    .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '')
+    // keep only letters, digits, and spaces
+    .replace(/[^\p{L}\p{N} ]/gu, '')
+    // collapse repeated spaces
+    .replace(/  +/g, ' ')
+    .trim();
+}
+
 // ── Levenshtein distance ──────────────────────────────────────────────────────
 function levenshtein(a, b) {
   const m = a.length, n = b.length;
@@ -380,6 +454,72 @@ async function findBestChat(spokenName) {
 // ── Command parser ────────────────────────────────────────────────────────────
 const COMMAND_VERBS = /^(send|message|tell|open|go|read|copy|paste|search|call|voice|video|close)/;
 
+// Literal strings that are not valid message content
+const INVALID_MESSAGES = new Set(['message', 'a message', 'whatsapp', 'a whatsapp message']);
+
+/** Strip leading/trailing punctuation and whitespace from a field. */
+function stripEdgePunct(s) {
+  return s.replace(/^[\s.,!?]+|[\s.,!?]+$/g, '');
+}
+
+/**
+ * Try to parse a send-message command from the ORIGINAL (un-normalized) raw
+ * transcript. Returns { type:'send', name, message } or null.
+ *
+ * Patterns tried in order (case-insensitive):
+ *  a. "send [a/the] [whatsapp] message to <name>[,/.] <msg>"
+ *  b. "send [a/the] [whatsapp] message to <name> (saying|that says|that|say) <msg>"
+ *  c. "send <msg> to <name>"
+ *  d. "(message|text|tell) <name>[,.]? <msg>"
+ */
+function parseSendRaw(raw) {
+  let m;
+
+  // a. name ends at first period or comma
+  m = raw.match(/^send (?:a |the )?(?:whatsapp )?message to ([^.,]+?)[.,]\s*(.+)$/i);
+  if (m) {
+    const name    = stripEdgePunct(m[1]);
+    const message = stripEdgePunct(m[2]);
+    if (name && message && !INVALID_MESSAGES.has(message.toLowerCase())) {
+      return { type: 'send', name, message };
+    }
+  }
+
+  // b. name ends before saying/that says/that/say
+  m = raw.match(/^send (?:a |the )?(?:whatsapp )?message to (\S+(?:\s+\S+)?) (?:saying|that says|that|say) (.+)$/i);
+  if (m) {
+    const name    = stripEdgePunct(m[1]);
+    const message = stripEdgePunct(m[2]);
+    if (name && message && !INVALID_MESSAGES.has(message.toLowerCase())) {
+      return { type: 'send', name, message };
+    }
+  }
+
+  // c. "send <msg> to <name>" — message comes first, name at end
+  m = raw.match(/^send (.+?) to ([^.,]+)$/i);
+  if (m) {
+    const message = stripEdgePunct(m[1]);
+    const name    = stripEdgePunct(m[2]);
+    // Reject if the "message" part is really a "message to" meta-phrase
+    if (name && message && !INVALID_MESSAGES.has(message.toLowerCase()) &&
+        !/^(?:a |the )?(?:whatsapp )?message$/i.test(message)) {
+      return { type: 'send', name, message };
+    }
+  }
+
+  // d. "(message|text|tell) <name>[,.]? <msg>"
+  m = raw.match(/^(?:message|text|tell) (\S+(?:\s+\S+)?)[.,]?\s+(.+)$/i);
+  if (m) {
+    const name    = stripEdgePunct(m[1]);
+    const message = stripEdgePunct(m[2]);
+    if (name && message && !INVALID_MESSAGES.has(message.toLowerCase())) {
+      return { type: 'send', name, message };
+    }
+  }
+
+  return null;
+}
+
 /**
  * Split on " and then ", " then ", " and " — but only where what follows
  * starts with a known command verb.
@@ -398,7 +538,10 @@ function splitSequence(text) {
 }
 
 /**
- * parseCommand(text) — regex-based command parser.
+ * parseCommand(raw) — regex-based command parser.
+ *
+ * Tries raw-transcript send patterns first (preserving original capitalization),
+ * then falls back to the normalized pipeline for all other commands.
  *
  * Returns one of:
  *  { type: 'send',        message, name }
@@ -414,6 +557,14 @@ function splitSequence(text) {
  *  null  — not understood
  */
 function parseCommand(raw) {
+  // ── 1. Try raw send patterns before normalizing ───────────────────────────
+  const rawSend = parseSendRaw(raw.trim());
+  if (rawSend) {
+    console.log('[AccessAI] parsed final:', rawSend);
+    return rawSend;
+  }
+
+  // ── 2. Normalize and run the rest of the pipeline ─────────────────────────
   const text = normalizeText(raw);
   console.log('AccessAI parsed: normalizing "' + raw + '" → "' + text + '"');
 
@@ -423,145 +574,132 @@ function parseCommand(raw) {
     const steps = parts.map(parseCommand).filter(Boolean);
     if (steps.length > 1) {
       const parsed = { type: 'sequence', steps };
-      console.log('AccessAI parsed:', parsed);
+      console.log('[AccessAI] parsed final:', parsed);
       return parsed;
     }
   }
 
   let m;
+  let p;
 
   // ── send it to <name> ─────────────────────────────────────────────────────
   m = text.match(/^send it to (.+)$/);
-  if (m) { const p = { type: 'send_it_to', name: m[1].trim() }; console.log('AccessAI parsed:', p); return p; }
+  if (m) { p = { type: 'send_it_to', name: m[1].trim() }; console.log('[AccessAI] parsed final:', p); return p; }
 
-  // ── send <msg> to <name>  /  tell <name> <msg>  /  message <name> <msg> ──
-  // "send X to Y" — split on LAST " to "
+  // ── send <msg> to <name> (normalized fallback) ────────────────────────────
   m = text.match(/^send (.+)$/);
   if (m) {
     const body = m[1];
     const lastTo = body.lastIndexOf(' to ');
     if (lastTo !== -1) {
-      const p = { type: 'send', message: body.slice(0, lastTo).trim(), name: body.slice(lastTo + 4).trim() };
-      console.log('AccessAI parsed:', p); return p;
+      const message = body.slice(0, lastTo).trim();
+      const name    = body.slice(lastTo + 4).trim();
+      if (!INVALID_MESSAGES.has(message)) {
+        p = { type: 'send', message, name };
+        console.log('[AccessAI] parsed final:', p); return p;
+      }
     }
   }
+
+  // ── tell/message <name> <msg> (normalized fallback) ──────────────────────
   m = text.match(/^(?:tell|message) (\S+(?:\s+\S+)??) (.+)$/);
-  if (m) { const p = { type: 'send', name: m[1].trim(), message: m[2].trim() }; console.log('AccessAI parsed:', p); return p; }
+  if (m) {
+    p = { type: 'send', name: m[1].trim(), message: m[2].trim() };
+    console.log('[AccessAI] parsed final:', p); return p;
+  }
 
   // ── open <name>  /  go to <name>  /  open chat with <name> ───────────────
   m = text.match(/^(?:open chat with|open chat for|open|go to) (.+)$/);
-  if (m) { const p = { type: 'open', name: m[1].trim() }; console.log('AccessAI parsed:', p); return p; }
+  if (m) { p = { type: 'open', name: m[1].trim() }; console.log('[AccessAI] parsed final:', p); return p; }
 
   // ── read last message ─────────────────────────────────────────────────────
   if (/read (?:my |the )?last message/.test(text)) {
-    const p = { type: 'read_last' }; console.log('AccessAI parsed:', p); return p;
+    p = { type: 'read_last' }; console.log('[AccessAI] parsed final:', p); return p;
   }
 
   // ── copy last message / copy it ───────────────────────────────────────────
   if (/copy (?:the |my |last )?(?:last )?message|copy it/.test(text)) {
-    const p = { type: 'copy_last' }; console.log('AccessAI parsed:', p); return p;
+    p = { type: 'copy_last' }; console.log('[AccessAI] parsed final:', p); return p;
   }
 
   // ── paste / paste it ──────────────────────────────────────────────────────
   if (/^paste(?: it)?$/.test(text)) {
-    const p = { type: 'paste' }; console.log('AccessAI parsed:', p); return p;
+    p = { type: 'paste' }; console.log('[AccessAI] parsed final:', p); return p;
   }
 
   // ── search for <text> / search <text> ────────────────────────────────────
   m = text.match(/^search(?: for)? (.+)$/);
-  if (m) { const p = { type: 'search', query: m[1].trim() }; console.log('AccessAI parsed:', p); return p; }
+  if (m) { p = { type: 'search', query: m[1].trim() }; console.log('[AccessAI] parsed final:', p); return p; }
 
   // ── close / go back ──────────────────────────────────────────────────────
   if (/^(?:close(?: chat)?|go back)$/.test(text)) {
-    const p = { type: 'close' }; console.log('AccessAI parsed:', p); return p;
+    p = { type: 'close' }; console.log('[AccessAI] parsed final:', p); return p;
   }
 
   // ── video call <name> ─────────────────────────────────────────────────────
   m = text.match(/^video call (.+)$/);
-  if (m) { const p = { type: 'call', name: m[1].trim(), callType: 'video' }; console.log('AccessAI parsed:', p); return p; }
+  if (m) { p = { type: 'call', name: m[1].trim(), callType: 'video' }; console.log('[AccessAI] parsed final:', p); return p; }
 
   // ── voice call <name> / call <name> ──────────────────────────────────────
   m = text.match(/^(?:voice call|call) (.+)$/);
-  if (m) { const p = { type: 'call', name: m[1].trim(), callType: 'voice' }; console.log('AccessAI parsed:', p); return p; }
+  if (m) { p = { type: 'call', name: m[1].trim(), callType: 'voice' }; console.log('[AccessAI] parsed final:', p); return p; }
 
-  console.log('AccessAI parsed: null (unrecognized)');
+  console.log('[AccessAI] parsed final: null (unrecognized)');
   return null;
 }
 
-// ── Confirmation helpers (set by initVoice after speak is available) ──────────
-// These are populated by initVoice so the router can call speak() and
-// listen for a confirmation utterance without duplicating TTS logic.
-let _voiceSpeakFn       = null;  // (text, onDone) => void
-let _voiceListenOnceFn  = null;  // (timeoutMs) => Promise<string|null>
+// ── Shared yes/no word lists (used by confirmation inside conversation mode) ──
+const CONFIRM_YES_WORDS = ['yes', 'yeah', 'yep', 'yup', 'haan', 'han', 'ji', 'ok', 'okay', 'sure', 'confirm', 'send it', 'theek hai'];
+const CONFIRM_NO_WORDS  = ['no', 'nope', 'nahi', 'nahin', 'cancel', 'stop'];
 
-/**
- * Speak via TTS (delegates to the voice module's speak()).
- * Safe to call even before initVoice runs (no-ops then).
- */
+// ── voiceSpeak stub — wired by initVoice ─────────────────────────────────────
+let _voiceSpeakFn        = null;
+// Called after every voiceSpeak utterance; wired by initVoice to restore mode.
+let _afterVoiceSpeakHook = null;
+
 function voiceSpeak(text) {
   return new Promise(resolve => {
     if (!_voiceSpeakFn) { resolve(); return; }
-    _voiceSpeakFn(text, resolve);
+    _voiceSpeakFn(text, () => {
+      // Let initVoice restore the correct mode/badge/mic before resolving.
+      if (typeof _afterVoiceSpeakHook === 'function') _afterVoiceSpeakHook();
+      resolve();
+    });
   });
 }
 
-/**
- * Wait for one more final transcript within timeoutMs.
- * Returns the transcript string, or null on timeout.
- */
-function voiceListenOnce(timeoutMs) {
-  if (!_voiceListenOnceFn) return Promise.resolve(null);
-  return _voiceListenOnceFn(timeoutMs);
-}
-
-// ── Confirmation flow ─────────────────────────────────────────────────────────
-const CONFIRM_YES = /\b(yes|yeah|yep|confirm|send it|do it|haan)\b/i;
-const CONFIRM_NO  = /\b(no|cancel|stop|nahi)\b/i;
+// ── pendingConfirm — resolved by the conversation onresult handler ────────────
+// { resolve: Function }   (no deadline here — silence timer handles timeout)
+let pendingConfirm = null;
 
 /**
- * Ask a yes/no question via TTS, then listen 8 s.
- * Returns true (confirmed) or false (cancelled / timeout).
+ * askConfirmation(prompt)
+ * Speaks the prompt; the answer is picked up by the conversation onresult
+ * handler which checks pendingConfirm.  Returns Promise<boolean>.
  */
 async function askConfirmation(prompt) {
-  await voiceSpeak(prompt);
-  const answer = await voiceListenOnce(8000);
-  if (!answer) {
-    await voiceSpeak('Cancelled');
-    return false;
-  }
-  if (CONFIRM_YES.test(answer)) return true;
-  if (CONFIRM_NO.test(answer))  { await voiceSpeak('Cancelled'); return false; }
-  await voiceSpeak('Cancelled');
-  return false;
+  return new Promise(resolve => {
+    console.log('[AccessAI] confirm: waiting');
+    voiceSpeak(prompt).then(() => {
+      pendingConfirm = { resolve };
+    });
+  });
 }
 
 // ── executeVoiceCommand ───────────────────────────────────────────────────────
-/**
- * Main entry point called by handleCommand inside initVoice.
- * Parses, confirms if needed, executes, speaks feedback.
- * Always resolves (never throws).
- */
-async function executeVoiceCommand(rawText) {
-  const parsed = parseCommand(rawText);
-
+async function executeVoiceCommand(parsed) {
   if (!parsed) {
-    await voiceSpeak("Sorry, I didn't understand. Try again");
+    await voiceSpeak("Sorry, I didn't catch that. Try again.");
     return;
   }
-
-  // ── Sequence ────────────────────────────────────────────────────────────
   if (parsed.type === 'sequence') {
-    for (const step of parsed.steps) {
-      await executeVoiceCommand(_commandToRaw(step));
-    }
+    for (const step of parsed.steps) await executeVoiceCommand(step);
     return;
   }
-
-  // ── Dispatch ────────────────────────────────────────────────────────────
   await _runParsedCommand(parsed);
 }
 
-/** Re-serialise a parsed command back to a string for recursive sequence use. */
+/** Re-serialise a parsed command back to a string (used for debug logging). */
 function _commandToRaw(parsed) {
   switch (parsed.type) {
     case 'send':       return `send ${parsed.message} to ${parsed.name}`;
@@ -581,115 +719,135 @@ function _commandToRaw(parsed) {
 async function _runParsedCommand(parsed) {
   switch (parsed.type) {
 
-    // ── open ───────────────────────────────────────────────────────────────
     case 'open': {
-      await voiceSpeak(`Looking for ${parsed.name}`);
+      await voiceSpeak(`Looking for ${speakableName(parsed.name)}.`);
       const found = await findBestChat(parsed.name);
-      if (!found) { await voiceSpeak("I couldn't find that contact"); return; }
+      if (!found) {
+        await voiceSpeak("Hmm, I couldn't find that contact. Who did you mean?");
+        return;
+      }
       found.row.click();
       await sleep(500);
-      await voiceSpeak(`Opening ${found.title}`);
+      await voiceSpeak(`Opening ${speakableName(found.title)}.`);
       return;
     }
 
-    // ── read_last ──────────────────────────────────────────────────────────
     case 'read_last': {
       const msgs = readMessages(1);
-      const text = msgs[0] || 'no messages found';
-      await voiceSpeak(text);
+      await voiceSpeak(msgs[0] || 'No messages found.');
       return;
     }
 
-    // ── copy_last ──────────────────────────────────────────────────────────
     case 'copy_last': {
       const result = copyLast();
-      await voiceSpeak(result === 'no messages found' ? 'No messages found' : 'Copied');
+      await voiceSpeak(result === 'no messages found' ? 'No messages found.' : 'Copied.');
       return;
     }
 
-    // ── paste ──────────────────────────────────────────────────────────────
     case 'paste': {
       const result = pasteMemory();
-      await voiceSpeak(result === 'nothing copied' ? 'Nothing to paste' : 'Pasted');
+      await voiceSpeak(result === 'nothing copied' ? 'Nothing to paste.' : 'Pasted.');
       return;
     }
 
-    // ── search ─────────────────────────────────────────────────────────────
     case 'search': {
       await searchInChat(parsed.query);
-      await voiceSpeak(`Searching for ${parsed.query}`);
+      await voiceSpeak(`Searching for ${parsed.query}.`);
       return;
     }
 
-    // ── close ──────────────────────────────────────────────────────────────
     case 'close': {
       closeChat();
-      await voiceSpeak('Closed');
+      await voiceSpeak('Closed.');
       return;
     }
 
-    // ── send ───────────────────────────────────────────────────────────────
     case 'send': {
-      // Open the chat first
-      await voiceSpeak(`Looking for ${parsed.name}`);
+      let message = parsed.message || '';
+      if (!message || INVALID_MESSAGES.has(message.toLowerCase())) {
+        await voiceSpeak(`What should I say to ${speakableName(parsed.name)}?`);
+        // The answer will arrive as the next transcript via conversation mode —
+        // expose a one-shot resolve via pendingConfirm is not appropriate here;
+        // just wait for the next executeVoiceCommand call driven by the transcript.
+        // Abort this invocation; the user's next utterance (message text) will
+        // be handled as a bare transcript by the conversation loop.
+        return;
+      }
+
+      await voiceSpeak(`Looking for ${speakableName(parsed.name)}.`);
       const found = await findBestChat(parsed.name);
-      if (!found) { await voiceSpeak("I couldn't find that contact"); return; }
+      if (!found) {
+        await voiceSpeak("Hmm, I couldn't find that contact. Who did you mean?");
+        return;
+      }
       found.row.click();
-      await sleep(600);
 
       const confirmed = await askConfirmation(
-        `Send "${parsed.message}" to ${found.title}. Say yes to confirm.`
+        `Send "${message}" to ${speakableName(found.title)}. Sure?`
       );
       if (!confirmed) return;
 
-      const r = await sendMessage(parsed.message);
-      await voiceSpeak(r === 'sent' ? 'Sent' : `Error: ${r}`);
+      await voiceSpeak('Sure, one moment.');
+      const r = await sendMessage(message, found.title);
+      if (r === 'chat panel not found') {
+        await voiceSpeak("I couldn't open that chat.");
+        return;
+      }
+      await voiceSpeak(r === 'sent' ? "Done, I sent it." : `Error: ${r}`);
       return;
     }
 
-    // ── send_it_to ─────────────────────────────────────────────────────────
     case 'send_it_to': {
-      if (!clipboardMemory) { await voiceSpeak('Nothing copied to send'); return; }
+      if (!clipboardMemory) { await voiceSpeak("Nothing copied to send."); return; }
 
-      await voiceSpeak(`Looking for ${parsed.name}`);
+      await voiceSpeak(`Looking for ${speakableName(parsed.name)}.`);
       const found = await findBestChat(parsed.name);
-      if (!found) { await voiceSpeak("I couldn't find that contact"); return; }
+      if (!found) {
+        await voiceSpeak("Hmm, I couldn't find that contact. Who did you mean?");
+        return;
+      }
       found.row.click();
-      await sleep(600);
 
       const confirmed = await askConfirmation(
-        `Send "${clipboardMemory}" to ${found.title}. Say yes to confirm.`
+        `Send "${clipboardMemory}" to ${speakableName(found.title)}. Sure?`
       );
       if (!confirmed) return;
 
+      await voiceSpeak('Sure, one moment.');
       pasteMemory();
       await sleep(300);
-      const r = await sendMessage(clipboardMemory);
-      await voiceSpeak(r === 'sent' ? 'Sent' : `Error: ${r}`);
+      const r = await sendMessage(clipboardMemory, found.title);
+      if (r === 'chat panel not found') {
+        await voiceSpeak("I couldn't open that chat.");
+        return;
+      }
+      await voiceSpeak(r === 'sent' ? "Done, I sent it." : `Error: ${r}`);
       return;
     }
 
-    // ── call ───────────────────────────────────────────────────────────────
     case 'call': {
-      await voiceSpeak(`Looking for ${parsed.name}`);
+      await voiceSpeak(`Looking for ${speakableName(parsed.name)}.`);
       const found = await findBestChat(parsed.name);
-      if (!found) { await voiceSpeak("I couldn't find that contact"); return; }
+      if (!found) {
+        await voiceSpeak("Hmm, I couldn't find that contact. Who did you mean?");
+        return;
+      }
       found.row.click();
       await sleep(600);
 
       const label = parsed.callType === 'video' ? 'Video call' : 'Call';
       const confirmed = await askConfirmation(
-        `${label} ${found.title}. Say yes to confirm.`
+        `${label} ${speakableName(found.title)}. Sure?`
       );
       if (!confirmed) return;
 
       const r = await startCall(parsed.callType);
-      await voiceSpeak(r === 'calling' ? 'Calling' : `Error: ${r}`);
+      await voiceSpeak(r === 'calling' ? 'Calling.' : `Error: ${r}`);
       return;
     }
 
     default:
-      await voiceSpeak("Sorry, I didn't understand. Try again");
+      await voiceSpeak("Sorry, I didn't understand. Try again.");
   }
 }
 
@@ -699,244 +857,409 @@ async function _runParsedCommand(parsed) {
     window.SpeechRecognition || window.webkitSpeechRecognition;
 
   if (!SpeechRecognition) {
-    console.warn('AccessAI: SpeechRecognition not available in this browser.');
+    console.warn('[AccessAI] SpeechRecognition not available in this browser.');
     setBadge('AccessAI (no mic API)');
     return;
   }
 
-  // ── State ──────────────────────────────────────────────────────────────────
-  // Modes: 'idle' | 'wake' | 'command' | 'speaking'
-  let mode       = 'idle';
-  let isRunning  = false;   // true between onstart and onend (authoritative)
-  let isSpeaking = false;   // true while TTS is active
-  let hasStarted = false;   // true once the user clicked the badge
-  let commandTimer = null;  // 10-second no-command timeout
+  // ── Modes: "wake" | "conversation" | "speaking" ────────────────────────────
+  let mode = 'idle';
 
-  // ── Single recognition instance ────────────────────────────────────────────
+  function setMode(next) {
+    if (mode === next) return;
+    console.log(`[AccessAI] mode: ${mode} → ${next}`);
+    mode = next;
+  }
+
+  // ── 30-second silence timer ────────────────────────────────────────────────
+  const CONV_TIMEOUT_MS = 30_000;
+  let silenceTimer = null;
+
+  function resetSilenceTimer() {
+    clearTimeout(silenceTimer);
+    silenceTimer = setTimeout(() => endConversation('silence timeout'), CONV_TIMEOUT_MS);
+  }
+
+  function clearSilenceTimer() {
+    clearTimeout(silenceTimer);
+    silenceTimer = null;
+  }
+
+  function endConversation(reason) {
+    console.log(`[AccessAI] conversation ended (${reason})`);
+    clearSilenceTimer();
+    pendingConfirm = null;
+    setMode('speaking');
+    speak("Okay, I'm here if you need me.", () => {
+      setMode('wake');
+      setBadge('Listening for Hi AI');
+    });
+  }
+
+  // ── Farewell phrases that end the conversation ─────────────────────────────
+  const FAREWELL_RE = /\b(bye|goodbye|that's all|thats all|stop listening|thank you)\b/i;
+
+  // ── Recognition instance ───────────────────────────────────────────────────
   const recog = new SpeechRecognition();
-  recog.continuous      = true;
-  recog.interimResults  = false;
-  recog.lang            = 'en-US';
+  recog.continuous     = true;
+  recog.interimResults = true;
+  recog.lang           = 'en-US';
 
-  // ── startRecognition / stopRecognition ──────────────────────────────────────
-  function startRecognition() {
-    if (isRunning || isSpeaking) return;
+  // True while the recognition session is open (between onstart and onend).
+  let isRecognizing      = false;
+  let recogStartAttempts = 0;
+
+  function startRecog() {
+    recogStartAttempts = 0;
+    _tryStartRecog();
+  }
+
+  function _tryStartRecog() {
     try {
       recog.start();
-      // isRunning is set to true in onstart, not here, to stay in sync
+      recogStartAttempts = 0;
     } catch (e) {
-      // InvalidStateError = already started; ignore silently
-      if (!e.message.includes('already started')) {
-        console.warn('AccessAI: recognition start error', e.message);
+      // "already started" / InvalidStateError — the session is already open
+      if (/already|InvalidState/i.test(e.message || e.name || '')) {
+        isRecognizing = true; // correct the flag and bail
+        return;
+      }
+      console.warn('[AccessAI] recog.start() error:', e.message);
+      if (recogStartAttempts < 3) {
+        recogStartAttempts++;
+        setTimeout(_tryStartRecog, 400);
       }
     }
   }
 
-  function stopRecognition() {
-    if (!isRunning) return;
-    try { recog.stop(); } catch (_) {}
-    // isRunning is set to false in onend
+  // ── Watchdog: restart mic if it has gone silent outside of speech ──────────
+  function ensureListening() {
+    if (mode === 'speaking' || mode === 'idle') return;
+    if (isRecognizing) return;
+    console.log(`[AccessAI] watchdog: restarted mic (mode=${mode})`);
+    _tryStartRecog();
   }
 
-  // ── Wake-phrase detection ───────────────────────────────────────────────────
-  const WAKE_REGEX =
-    /\b(hey|he|hi|hay|a|okay|ok)\s+(access|acces|axis|excess|assess|accessai|access\s+ai|access\s+a\s+i)\b(.*)/;
+  setInterval(ensureListening, 1000);
 
   function normalizeTranscript(text) {
-    return text
-      .toLowerCase()
-      .replace(/[^\w\s]/g, '')  // remove punctuation
-      .replace(/\s+/g, ' ')     // collapse spaces
-      .trim();
+    return text.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
   }
 
-  /**
-   * @returns {{ matched: boolean, tail: string }}
-   *   tail = trimmed text after the wake phrase, empty if none.
-   */
+  // ── Wake-phrase detection ──────────────────────────────────────────────────
+  const WAKE_TOKENS    = ['hiai', 'heyai', 'haiai', 'hiay', 'hiaye', 'hieye', 'highai', 'hiii', 'hii', 'hyai'];
+  const WAKE_GREETINGS = new Set(['hi', 'hey', 'hai', 'high']);
+  const WAKE_AI_WORDS  = new Set(['ai', 'i', 'eye', 'a']);
+
+  function isWakePhrase(transcript) {
+    const lower = transcript.toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+    const words = lower.split(' ').filter(Boolean);
+    const joined = words.slice(0, 3).join('');
+
+    for (const token of WAKE_TOKENS) {
+      if (levenshtein(joined, token) <= 1) {
+        console.log(`[AccessAI] wake check: "${transcript}" -> true`);
+        return true;
+      }
+    }
+    if (words.length >= 2 && WAKE_GREETINGS.has(words[0]) && WAKE_AI_WORDS.has(words[1])) {
+      console.log(`[AccessAI] wake check: "${transcript}" -> true`);
+      return true;
+    }
+    console.log(`[AccessAI] wake check: "${transcript}" -> false`);
+    return false;
+  }
+
+  /** Returns { matched, tail } — tail is everything spoken after the wake phrase. */
   function matchWakePhrase(normalized) {
-    const m = WAKE_REGEX.exec(normalized);
-    if (!m) return { matched: false, tail: '' };
-    return { matched: true, tail: m[3].trim() };
+    const words = normalized.split(' ').filter(Boolean);
+    if (!isWakePhrase(normalized)) return { matched: false, tail: '' };
+    const tail = words.slice(3).join(' ').trim();
+    return { matched: true, tail };
   }
 
-  // ── Command timeout (10 s) ──────────────────────────────────────────────────
-  function clearCommandTimer() {
-    if (commandTimer) { clearTimeout(commandTimer); commandTimer = null; }
-  }
+  // ── speak(text, onDone) ────────────────────────────────────────────────────
+  // Queues spoken items; each item's onDone is called after its utterance.
+  // The "after speech" helper logs the required line and calls ensureListening.
+  // A safety timer fires speechSynthesis.cancel() if the utterance stalls.
 
-  function startCommandTimer() {
-    clearCommandTimer();
-    commandTimer = setTimeout(() => {
-      console.log('AccessAI: command timeout');
-      speak("I didn't hear anything", () => {
-        enterWakeMode();
-        startRecognition();
-      });
-    }, 10000);
-  }
+  const _speakQueue = [];  // { text, onDone }
+  let   _speakBusy  = false;
 
-  // ── Mode transitions ────────────────────────────────────────────────────────
-  function enterWakeMode() {
-    clearCommandTimer();
-    mode = 'wake';
-    setBadge('Listening for Hey Access');
-    console.log('AccessAI: entering wake mode');
-  }
+  function _drainSpeakQueue() {
+    if (_speakBusy || _speakQueue.length === 0) return;
+    const { text, onDone } = _speakQueue.shift();
+    _speakBusy = true;
 
-  function enterCommandMode() {
-    mode = 'command';
-    setBadge('Listening for your command');
-    console.log('AccessAI: entering command mode');
-    startCommandTimer();
-  }
-
-  // ── Speech synthesis ────────────────────────────────────────────────────────
-  function speak(text, onDone) {
     window.speechSynthesis.cancel();
+    console.log('[AccessAI] speaking →', text);
+    setBadge('Speaking…');
 
-    isSpeaking = true;
-    mode = 'speaking';
-    setBadge('Speaking');
-    stopRecognition();
-    console.log('AccessAI: speaking →', text);
+    // Abort recognition while speaking so it cannot hear TTS output.
+    try { recog.abort(); } catch (_) {}
 
-    const utter = new SpeechSynthesisUtterance(text);
-    utter.lang = 'en-US';
+    const utter     = new SpeechSynthesisUtterance(text);
+    utter.lang      = 'en-US';
+    let fired       = false;
 
-    const finish = () => {
-      isSpeaking = false;
-      console.log('AccessAI: speech ended');
+    const afterUtterance = (isError) => {
+      if (fired) return;
+      fired = true;
+      clearTimeout(safetyTimer);
+      if (isError) console.warn('[AccessAI] speech synthesis error');
+      console.log('[AccessAI] speech ended');
+
+      // Run the caller's onDone (sets mode, badge, calls startRecog)
       if (typeof onDone === 'function') onDone();
+
+      // Log post-speech state then nudge the mic
+      console.log(`[AccessAI] after speech -> mode=${mode}, isRecognizing=${isRecognizing}`);
+      ensureListening();
+
+      // Drain the next queued item
+      _speakBusy = false;
+      _drainSpeakQueue();
     };
 
-    utter.onend   = finish;
-    utter.onerror = (e) => {
-      console.warn('AccessAI: speech error', e.error);
-      finish();
-    };
+    // Safety timer: if TTS stalls, force-finish
+    const safetyMs   = text.length * 90 + 3000;
+    const safetyTimer = setTimeout(() => {
+      console.warn(`[AccessAI] speak safety timer fired after ${safetyMs} ms`);
+      window.speechSynthesis.cancel();
+      afterUtterance(false);
+    }, safetyMs);
+
+    utter.onend   = () => afterUtterance(false);
+    utter.onerror = (e) => { console.warn('[AccessAI] utter.onerror', e.error); afterUtterance(true); };
 
     window.speechSynthesis.speak(utter);
   }
 
-  // ── Command handler — delegates to the voice command router ─────────────────
-  function handleCommand(cmd) {
-    clearCommandTimer();
-    setBadge(`"${cmd}"`);
-    console.log('AccessAI command captured:', cmd);
-
-    // Wire the router's speak/listen hooks to this closure's speak()
-    _voiceSpeakFn = speak;
-    _voiceListenOnceFn = (timeoutMs) => new Promise(resolve => {
-      // Temporarily enter a special 'confirm' sub-mode:
-      // re-use command mode's listener but resolve on the first transcript.
-      mode = 'command';
-      setBadge('Say yes or no');
-      let settled = false;
-
-      // Ensure recognition is running so we can hear the answer.
-      // speak() will have stopped it; restart it now.
-      startRecognition();
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        resolve(null);
-      }, timeoutMs);
-
-      // Monkey-patch onresult just for this one utterance
-      const prevOnResult = recog.onresult;
-      recog.onresult = (event) => {
-        for (let i = event.resultIndex; i < event.results.length; i++) {
-          if (!event.results[i].isFinal) continue;
-          const t = event.results[i][0].transcript.trim();
-          if (!t) continue;
-          if (settled) continue;
-          settled = true;
-          clearTimeout(timer);
-          recog.onresult = prevOnResult;
-          resolve(t);
-          return;
-        }
-      };
-    });
-
-    // Run the router; when done return to wake mode and restart recognition
-    executeVoiceCommand(cmd).then(() => {
-      enterWakeMode();
-      startRecognition();
-    });
+  function speak(text, onDone) {
+    setMode('speaking');   // mark speaking immediately so onresult drops mic input
+    _speakQueue.push({ text, onDone });
+    _drainSpeakQueue();
   }
 
-  // ── Transcript handler ──────────────────────────────────────────────────────
+  // Wire voiceSpeak so executeVoiceCommand can call it.
+  _voiceSpeakFn = speak;
+
+  // After each voiceSpeak utterance, restore mode to conversation (or wake if
+  // the conversation has already ended) and nudge the mic.
+  _afterVoiceSpeakHook = () => {
+    const nextMode = (mode === 'wake' || mode === 'idle') ? 'wake' : 'conversation';
+    setMode(nextMode);
+    setBadge(nextMode === 'wake' ? 'Listening for Hi AI' : 'Listening…');
+    ensureListening();
+  };
+
+  // ── isExecuting guard ──────────────────────────────────────────────────────
+  let isExecuting = false;
+
+  // ── handleConversationTranscript(raw) ─────────────────────────────────────
+  // Called for every final transcript while in "conversation" mode.
+  // Handles: farewell, confirm answer, commands.
+  async function handleConversationTranscript(raw) {
+    const norm = normalizeTranscript(raw);
+    console.log(`[AccessAI] conversation transcript: "${raw}"`);
+
+    // Reset the 30-second silence timer on every transcript.
+    resetSilenceTimer();
+
+    // ── Farewell ─────────────────────────────────────────────────────────────
+    if (FAREWELL_RE.test(raw)) {
+      endConversation('user farewell');
+      return;
+    }
+
+    // ── Confirm answer ────────────────────────────────────────────────────────
+    if (pendingConfirm) {
+      let lastYesIdx = -1;
+      let lastNoIdx  = -1;
+
+      for (const w of CONFIRM_YES_WORDS) {
+        const re = new RegExp(`\\b${w.replace(/\s+/g, '\\s+')}\\b`, 'gi');
+        let m;
+        while ((m = re.exec(norm)) !== null) {
+          if (m.index > lastYesIdx) lastYesIdx = m.index;
+        }
+      }
+      for (const w of CONFIRM_NO_WORDS) {
+        const re = new RegExp(`\\b${w.replace(/\s+/g, '\\s+')}\\b`, 'gi');
+        let m;
+        while ((m = re.exec(norm)) !== null) {
+          if (m.index > lastNoIdx) lastNoIdx = m.index;
+        }
+      }
+
+      const gotYes = lastYesIdx !== -1;
+      const gotNo  = lastNoIdx  !== -1;
+
+      if (gotYes && (!gotNo || lastYesIdx > lastNoIdx)) {
+        console.log('[AccessAI] confirm: yes');
+        const { resolve } = pendingConfirm;
+        pendingConfirm = null;
+        resolve(true);
+        return;
+      }
+      if (gotNo && (!gotYes || lastNoIdx > lastYesIdx)) {
+        console.log('[AccessAI] confirm: no');
+        const { resolve } = pendingConfirm;
+        pendingConfirm = null;
+        resolve(false);
+        setMode('speaking');
+        speak('Cancelled.', () => {
+          setMode('conversation');
+          setBadge('Listening…');
+          startRecog();
+        });
+        return;
+      }
+
+      // Ambiguous — ask again; keep waiting (silence timer already reset above).
+      setMode('speaking');
+      speak("Sorry, was that a yes or a no?", () => {
+        setMode('conversation');
+        setBadge('Listening…');
+        startRecog();
+      });
+      return;
+    }
+
+    // ── Command ───────────────────────────────────────────────────────────────
+    if (isExecuting) {
+      console.log(`[AccessAI] ignored (already executing): "${raw}"`);
+      return;
+    }
+
+    const parsed = parseCommand(raw);
+    if (!parsed) {
+      setMode('speaking');
+      speak("Sorry, I didn't catch that. Try again.", () => {
+        setMode('conversation');
+        setBadge('Listening…');
+        startRecog();
+      });
+      return;
+    }
+
+    isExecuting = true;
+    setMode('speaking');   // recognition aborted inside speak(); restarted in callbacks
+    await executeVoiceCommand(parsed);
+    isExecuting = false;
+
+    // If a nested confirm ended the conversation, respect that.
+    if (mode !== 'wake') {
+      setMode('conversation');
+      setBadge('Listening…');
+      startRecog();
+    }
+  }
+
+  // ── onresult ───────────────────────────────────────────────────────────────
   recog.onresult = (event) => {
     for (let i = event.resultIndex; i < event.results.length; i++) {
-      if (!event.results[i].isFinal) continue;
-
+      const isFinal    = event.results[i].isFinal;
       const transcript = event.results[i][0].transcript.trim();
       if (!transcript) continue;
 
+      // Only process interim in wake mode; everything else needs a final result.
+      if (!isFinal && mode !== 'wake') continue;
+
+      console.log(`[AccessAI] transcript (mode=${mode}, final=${isFinal}): "${transcript}"`);
+
+      // Hard rule: drop everything while speaking.
+      if (mode === 'speaking') {
+        console.log(`[AccessAI] ignored (speaking): "${transcript}"`);
+        continue;
+      }
+
+      // ── Wake mode ──────────────────────────────────────────────────────────
       if (mode === 'wake') {
         const normalized = normalizeTranscript(transcript);
         const { matched, tail } = matchWakePhrase(normalized);
-        if (!matched) continue; // privacy: no log for non-wake speech
+        if (!matched) continue; // privacy: do not log non-wake speech
 
-        console.log('AccessAI: wake phrase detected');
+        console.log('[AccessAI] wake phrase detected, conversation started');
+        setMode('speaking');
 
-        const wordCount = tail.split(/\s+/).filter(Boolean).length;
-        if (wordCount >= 2) {
-          handleCommand(tail);           // same-breath command
+        if (tail) {
+          // Inline command: say "Yes?" then run it immediately.
+          speak('Yes?', () => {
+            setMode('conversation');
+            setBadge('Listening…');
+            console.log('[AccessAI] conversation started');
+            resetSilenceTimer();
+            startRecog();
+            // Execute the inline command as the first transcript.
+            handleConversationTranscript(tail);
+          });
         } else {
-          enterCommandMode();            // wait for next utterance
+          speak('Yes?', () => {
+            setMode('conversation');
+            setBadge('Listening…');
+            console.log('[AccessAI] conversation started');
+            resetSilenceTimer();
+            startRecog();
+          });
         }
-
-      } else if (mode === 'command') {
-        handleCommand(transcript);
+        return;
       }
-      // 'speaking' / 'idle': ignore
+
+      // ── Conversation mode ──────────────────────────────────────────────────
+      if (mode === 'conversation' && isFinal) {
+        // Reset silence timer on every final transcript.
+        resetSilenceTimer();
+        handleConversationTranscript(transcript);
+        return;
+      }
     }
   };
 
-  // ── Recognition lifecycle ───────────────────────────────────────────────────
+  // ── onspeechstart — also resets the silence timer ─────────────────────────
+  recog.onspeechstart = () => {
+    if (mode === 'conversation') resetSilenceTimer();
+  };
+
+  // ── Recognition lifecycle ──────────────────────────────────────────────────
   recog.onstart = () => {
-    isRunning = true;
-    console.log('AccessAI: recognition started');
+    isRecognizing = true;
+    console.log('[AccessAI] recog started');
+    if (mode === 'wake') setBadge('Listening for Hi AI');
+    else if (mode === 'conversation') setBadge('Listening…');
+  };
+
+  let _networkError = false;
+
+  recog.onerror = (event) => {
+    console.warn('[AccessAI] recog onerror:', event.error);
+    if (event.error === 'not-allowed') {
+      isRecognizing = false;
+      setBadge('Mic not allowed');
+      setMode('idle');
+      clearSilenceTimer();
+      return;
+    }
+    if (event.error === 'network') _networkError = true;
+    // onend fires after onerror; restart happens there.
   };
 
   recog.onend = () => {
-    isRunning = false;
-    console.log('AccessAI: recognition ended (mode=' + mode + ')');
+    isRecognizing = false;
+    console.log(`[AccessAI] recog ended (mode=${mode})`);
+    if (mode === 'idle' || mode === 'speaking') return; // do not restart while idle or speaking
 
-    if (isSpeaking || mode === 'idle') return; // TTS will restart; not yet started
+    const delay = _networkError ? 1500 : 400;
+    _networkError = false;
 
-    if (mode === 'command') {
-      // Restart quickly so the command utterance isn't missed;
-      // keep the existing 10-second timer running
-      setTimeout(startRecognition, 100);
-    } else {
-      // wake / speaking-cleanup: standard 500 ms restart
-      setTimeout(startRecognition, 500);
-    }
+    setTimeout(_tryStartRecog, delay);
   };
 
-  recog.onerror = (event) => {
-    // isRunning will be set false by the onend that always follows onerror
-    console.warn('AccessAI: recognition error', event.error);
-    // No manual restart here — onend fires next and handles it
-  };
-
-  // ── Watchdog: every 3 s, ensure recognition is running ─────────────────────
-  setInterval(() => {
-    if (!hasStarted || isSpeaking || isRunning || mode === 'idle') return;
-    console.log('AccessAI: watchdog restarted recognition');
-    startRecognition();
-  }, 3000);
-
-  // ── One-time start click ────────────────────────────────────────────────────
+  // ── One-time start ─────────────────────────────────────────────────────────
   badge.addEventListener('click', () => {
-    if (mode !== 'idle') return; // already running — ignore further clicks
-    hasStarted = true;
-    enterWakeMode();
-    startRecognition();
+    if (mode !== 'idle') return;
+    setMode('wake');
+    setBadge('Listening for Hi AI');
+    startRecog();
   });
 })();

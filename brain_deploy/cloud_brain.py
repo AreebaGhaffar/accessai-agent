@@ -8,7 +8,10 @@ No execution happens here — no pyautogui, no webbrowser, no clicking.
 Run on port 8000 (default).
 """
 
+import collections
+import hashlib
 import hmac
+import logging
 import os
 import subprocess
 import json
@@ -18,8 +21,15 @@ from pathlib import Path
 import boto3
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("accessai.demo")
 
 # ---------------------------------------------------------------------------
 # API-key guard (set BRAIN_API_KEY in the environment to enable)
@@ -181,6 +191,151 @@ def ask_claude(user_text: str) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
+# Demo system prompt
+# ---------------------------------------------------------------------------
+
+DEMO_SYSTEM_PROMPT = """You are an accessibility assistant inside a PRACTICE demo of \
+a fake WhatsApp. The user is learning to use the app.
+
+The only contacts that exist in this fake WhatsApp are:
+  Maryam, Ayesha, Mom, Caregiver, Doctor
+
+Things you CAN do inside this WhatsApp:
+  - Open a chat with a contact
+  - Read the last message in a chat
+  - Send a message
+  - Make a call (audio or video)
+  - Search for a contact or message
+
+You must NEVER suggest executing anything — this is planning only.
+
+Rules:
+1. If the request is clear and matches exactly one contact, produce a concrete plan.
+2. If the contact name is ambiguous or unclear, ask a short clarifying question in \
+   "say" and set needs_reply to true. Do not guess.
+3. If the request is something you cannot do inside WhatsApp, say so honestly in "say" \
+   and briefly list what you can do.
+4. Always respond in the SAME language the user used: English, Urdu (Arabic script), \
+   or Roman Urdu — never translate unless asked.
+5. "say" must be one or two short spoken sentences, friendly and natural — as if \
+   spoken aloud to someone learning to use a phone.
+6. "needs_confirm" is true when an action is about to be taken (e.g. sending a message \
+   or making a call) and you want the user to confirm first.
+7. "needs_reply" is true only when you asked a question and need the user to answer \
+   before proceeding.
+
+You MUST return ONLY valid JSON — no markdown, no explanation — in this exact shape:
+{
+  "say": "<one or two short spoken sentences>",
+  "steps": ["<short human-readable step>", ...],
+  "needs_confirm": true or false,
+  "needs_reply": true or false
+}"""
+
+
+# ---------------------------------------------------------------------------
+# Demo rate-limit state (in-memory, resets on process restart)
+# ---------------------------------------------------------------------------
+
+# Per-IP: deque of UTC timestamps for the current rolling minute
+_demo_ip_timestamps: dict[str, collections.deque] = {}
+
+# Global daily counter: {"date": "YYYY-MM-DD", "count": int}
+_demo_global = {"date": "", "count": 0}
+
+_DEMO_PER_IP_PER_MINUTE = 10
+_DEMO_GLOBAL_PER_DAY = 300
+
+
+def _get_client_ip(request: Request) -> str:
+    """Return the client IP: first value of X-Forwarded-For, else host."""
+    forwarded = request.headers.get("X-Forwarded-For", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def _demo_rate_check(ip: str) -> bool:
+    """
+    Return True if the request is within limits, False if it should be rejected.
+    Updates counters only when returning True.
+    """
+    now = _dt.datetime.utcnow()
+    today = now.strftime("%Y-%m-%d")
+
+    # Global daily cap
+    if _demo_global["date"] != today:
+        _demo_global["date"] = today
+        _demo_global["count"] = 0
+
+    if _demo_global["count"] >= _DEMO_GLOBAL_PER_DAY:
+        return False
+
+    # Per-IP rolling-minute cap
+    if ip not in _demo_ip_timestamps:
+        _demo_ip_timestamps[ip] = collections.deque()
+
+    dq = _demo_ip_timestamps[ip]
+    cutoff = now - _dt.timedelta(seconds=60)
+    while dq and dq[0] < cutoff:
+        dq.popleft()
+
+    if len(dq) >= _DEMO_PER_IP_PER_MINUTE:
+        return False
+
+    # Passed — record the hit
+    dq.append(now)
+    _demo_global["count"] += 1
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Demo Bedrock call
+# ---------------------------------------------------------------------------
+
+_DEMO_FALLBACK = {
+    "say": "Sorry, I had trouble thinking about that. Please try again.",
+    "steps": [],
+    "needs_confirm": False,
+    "needs_reply": False,
+}
+
+
+def ask_claude_demo(user_text: str) -> dict:
+    """Call Claude with the demo system prompt and return a parsed dict."""
+    client = get_bedrock_client()
+
+    response = client.converse(
+        modelId=MODEL_ID,
+        system=[{"text": DEMO_SYSTEM_PROMPT}],
+        messages=[{"role": "user", "content": [{"text": user_text}]}],
+        inferenceConfig={"maxTokens": 300},
+    )
+
+    raw = response["output"]["message"]["content"][0]["text"].strip()
+
+    # Strip markdown fences if present
+    if raw.startswith("```"):
+        lines = raw.splitlines()
+        inner = [l for l in lines[1:] if not l.strip().startswith("```")]
+        raw = "\n".join(inner).strip()
+
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        # Parsing failed — return a safe fallback with a friendly message
+        return _DEMO_FALLBACK.copy()
+
+    # Ensure required keys exist with sane defaults
+    return {
+        "say": str(data.get("say", _DEMO_FALLBACK["say"])),
+        "steps": list(data.get("steps", [])),
+        "needs_confirm": bool(data.get("needs_confirm", False)),
+        "needs_reply": bool(data.get("needs_reply", False)),
+    }
+
+
+# ---------------------------------------------------------------------------
 # Request / response models
 # ---------------------------------------------------------------------------
 
@@ -190,6 +345,10 @@ class PlanRequest(BaseModel):
 
 class PlanResponse(BaseModel):
     steps: list[dict]
+
+
+class DemoRequest(BaseModel):
+    text: str
 
 
 # ---------------------------------------------------------------------------
@@ -244,6 +403,55 @@ async def plan(req: PlanRequest, request: Request):
         raise HTTPException(status_code=500, detail=str(exc))
 
     return PlanResponse(steps=steps)
+
+
+# ---------------------------------------------------------------------------
+# Demo endpoint — no API key, planning only, rate-limited
+# ---------------------------------------------------------------------------
+
+@app.post("/demo")
+async def demo(req: DemoRequest, request: Request):
+    """
+    Practice endpoint — plans actions inside a fake WhatsApp demo.
+    No execution, no API key required.
+    """
+    # --- Input validation ---
+    text = req.text.strip() if req.text else ""
+    if not text:
+        raise HTTPException(status_code=400, detail="'text' must not be empty.")
+    if len(text) > 200:
+        raise HTTPException(
+            status_code=400,
+            detail="'text' must be 200 characters or fewer.",
+        )
+
+    # --- Rate limiting ---
+    ip = _get_client_ip(request)
+    if not _demo_rate_check(ip):
+        return JSONResponse(
+            status_code=429,
+            content={"say": "The demo is busy right now. Please try again in a minute."},
+        )
+
+    # --- Logging (no message content) ---
+    ip_hash = hashlib.sha256(ip.encode()).hexdigest()[:12]
+    logger.info(
+        "demo request ts=%s ip_hash=%s text_len=%d",
+        _dt.datetime.utcnow().isoformat(),
+        ip_hash,
+        len(text),
+    )
+
+    # --- Bedrock call ---
+    try:
+        result = ask_claude_demo(text)
+    except Exception:
+        return JSONResponse(
+            status_code=503,
+            content={"say": "The demo is temporarily unavailable."},
+        )
+
+    return result
 
 
 # ---------------------------------------------------------------------------
