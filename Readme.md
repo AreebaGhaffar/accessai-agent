@@ -13,7 +13,7 @@ Built by Areeba Ghaffar (team Mind Flayer) for the AWS Student Builder *Zero to 
 
 1. Open the live link and scroll to **"Try it: practice WhatsApp"**.
 2. Type or say: `Send hello to Maryam`. The assistant repeats the request, asks "Sure?", and only then "sends" it (a simulation, nothing leaves the page).
-3. Try Roman Urdu: `Maryam ko bolo main late hoon`.
+3. Roman Urdu: the practice demo is mainly English and may reply in Urdu script. The main Urdu and Roman Urdu support is in the laptop agent shown in the video.
 4. Try something it cannot do. It says so honestly and lists what it can do.
 5. The real laptop agent (sending real WhatsApp and Gmail messages, scrolling a site) is shown in the demo video linked from the Builder Center page.
 
@@ -23,7 +23,7 @@ Many people with motor disabilities, injuries or conditions that make hands unre
 
 ## The idea
 
-You say what you want, in English, Urdu or Roman Urdu. AccessAI works out the steps, repeats the request, asks before it sends or calls anything, and speaks back. It is meant to be hands-free after one-time setup.
+You say what you want, in English, with Urdu and Roman Urdu support in the cloud brain (typed Roman Urdu commands verified by me). AccessAI works out the steps, repeats the request, asks before it sends or calls anything, and speaks back. It is meant to be hands-free after one-time setup.
 
 **An illustrative day (a scenario, not a case study):** a person who cannot use their hands says "Hi AI, message my caregiver I need water". The assistant answers "Send 'I need water' to Caregiver. Sure?". They say "yes". It sends the message and says "Done." No mouse, no keyboard, and nothing is sent without their spoken yes.
 
@@ -39,7 +39,7 @@ We make no clinical or health-outcome claims.
 
 | Part | Status |
 |---|---|
-| Cloud brain on AWS: turns a spoken or typed request into steps (English, Urdu, Roman Urdu) | Working, live |
+| Cloud brain on AWS: turns a spoken or typed request into steps (built for English, Urdu and Roman Urdu; typed Roman Urdu verified) | Working, live |
 | Public practice demo (`/demo`): simulated WhatsApp chat, spoken replies, confirm before send | Working, live |
 | Laptop agent: open a website and scroll | Verified by the builder |
 | Laptop agent: compose a Gmail message and press Send | Verified by the builder |
